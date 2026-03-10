@@ -1,0 +1,44 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f5f5f0;
+  color: #1a1a1a;
+  min-height: 100vh;
+}
+
+#root {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+mark {
+  background: transparent;
+}
+
+[contenteditable]:focus {
+  outline: none;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 3px;
+}
+
+@keyframes throb {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(26, 26, 26, 0.4); }
+  50%       { box-shadow: 0 0 0 6px rgba(26, 26, 26, 0); }
+}
+
+.btn-throb {
+  animation: throb 1.8s ease-in-out infinite;
+}

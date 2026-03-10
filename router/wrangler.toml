@@ -1,0 +1,7 @@
+name = "awnist-router"
+main = "worker.js"
+compatibility_date = "2026-03-10"
+
+routes = [
+  { pattern = "awnist.com/*", zone_name = "awnist.com" }
+]
