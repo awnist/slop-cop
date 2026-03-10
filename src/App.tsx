@@ -20,7 +20,7 @@ export default function App() {
     try { return decodeURIComponent(hash) } catch { return SAMPLE_TEXT }
   })
   useHashText(text)
-  const isDefaultText = !window.location.hash.slice(1)
+  const isDefaultText = text === SAMPLE_TEXT
   const [clientViolations, setClientViolations] = useState<Violation[]>([])
   const [llmViolations, setLlmViolations] = useState<Violation[]>(
     isDefaultText ? (SAMPLE_VIOLATIONS as Violation[]) : []
@@ -33,6 +33,7 @@ export default function App() {
   const [llmError, setLlmError] = useState('')
   const [popover, setPopover] = useState<PopoverState | null>(null)
   const [hoveredRuleId, setHoveredRuleId] = useState<string | null>(null)
+  const [hintVisible, setHintVisible] = useState(true)
 
   const editorRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -45,7 +46,7 @@ export default function App() {
   textRef.current = text
   const violationsRef = useRef<Violation[]>([])
   // Snapshot of text at the time of last LLM run, for stale delta display
-  const lastAnalyzedTextRef = useRef<string>('')
+  const lastAnalyzedTextRef = useRef<string>(isDefaultText ? SAMPLE_TEXT : '')
   // Custom undo/redo stacks — needed because innerHTML replacement kills native undo history
   const undoStackRef = useRef<string[]>([])
   const redoStackRef = useRef<string[]>([])
@@ -59,8 +60,27 @@ export default function App() {
       const hint = Math.max(0, v.startIndex - 200)
       let idx = text.indexOf(v.matchedText, hint)
       if (idx === -1) idx = text.indexOf(v.matchedText)
-      if (idx === -1) return []
-      return [{ ...v, startIndex: idx, endIndex: idx + v.matchedText.length }]
+      if (idx !== -1) return [{ ...v, startIndex: idx, endIndex: idx + v.matchedText.length }]
+
+      // // Fuzzy fallback: tolerate small edits within or near the matched span.
+      // const mLen = v.matchedText.length
+      // const maxDist = Math.max(3, Math.floor(mLen * 0.05))
+      // const windowStart = Math.max(0, v.startIndex - 50)
+      // const windowEnd = Math.min(text.length - mLen, v.startIndex + 50)
+      // if (windowEnd < windowStart) return []
+      // let bestIdx = -1, bestDist = maxDist + 1
+      // const candidates = [v.startIndex, ...Array.from(
+      //   { length: windowEnd - windowStart + 1 }, (_, i) => windowStart + i
+      // )].filter(i => i >= 0 && i + mLen <= text.length)
+      // for (const i of candidates) {
+      //   const dist = boundedLevenshtein(text.slice(i, i + mLen), v.matchedText, bestDist - 1)
+      //   if (dist < bestDist) { bestDist = dist; bestIdx = i }
+      //   if (bestDist === 0) break
+      // }
+      // if (bestIdx === -1) return []
+      // return [{ ...v, startIndex: bestIdx, endIndex: bestIdx + mLen }]
+
+      return []
     })
     return [...clientViolations, ...resolved]
   }, [clientViolations, llmViolations, text])
@@ -86,9 +106,11 @@ export default function App() {
     if (isTypingRef.current) return
     const editor = editorRef.current
     if (!editor) return
+    const hadFocus = document.activeElement === editor
     const saved = saveCaretPosition(editor)
     editor.innerHTML = buildHighlightedHTML(text, allViolations, activeRules)
     if (saved !== null) restoreCaretPosition(editor, saved)
+    if (hadFocus) editor.focus()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allViolations, hiddenRules, idleCount])
 
@@ -98,6 +120,15 @@ export default function App() {
     if (!editor) return
     editor.innerHTML = buildHighlightedHTML(text, allViolations, activeRules)
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const markTyping = useCallback(() => {
+    isTypingRef.current = true
+    if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
+    typingTimerRef.current = setTimeout(() => {
+      isTypingRef.current = false
+      setIdleCount(c => c + 1)
+    }, 800)
   }, [])
 
   const restoreText = useCallback((value: string) => {
@@ -122,14 +153,9 @@ export default function App() {
     setText(value)
     setPopover(null)
     setLlmStatus(s => (s === 'done' || s === 'error') ? 'stale' : s)
-    // Track typing state to defer highlight rebuilds until user pauses
-    isTypingRef.current = true
-    if (typingTimerRef.current) clearTimeout(typingTimerRef.current)
-    typingTimerRef.current = setTimeout(() => {
-      isTypingRef.current = false
-      setIdleCount(c => c + 1)
-    }, 800)
-  }, [])
+    setHintVisible(false)
+    markTyping()
+  }, [markTyping])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
     const mod = e.metaKey || e.ctrlKey
@@ -242,7 +268,8 @@ export default function App() {
       .finally(oneDone)
   }, [apiKey, text])
 
-  // Dim all text and non-matching marks when hovering a sidebar rule
+  // Dim all text and non-matching marks when hovering a sidebar rule;
+  // override color of matching marks to show only the hovered rule's color
   useEffect(() => {
     const editor = editorRef.current
     if (!editor) return
@@ -251,21 +278,50 @@ export default function App() {
       editor.querySelectorAll<HTMLElement>('mark').forEach(m => {
         m.style.opacity = ''
         m.style.color = ''
+        if (m.dataset.hoverOverridden) {
+          m.style.background = m.dataset.origBg ?? ''
+          m.style.borderBottom = m.dataset.origBorderBottom ?? ''
+          delete m.dataset.hoverOverridden
+          delete m.dataset.origBg
+          delete m.dataset.origBorderBottom
+        }
       })
       return
     }
+    const hoveredRule = RULES_BY_ID[hoveredRuleId]
     editor.style.color = 'rgba(26,26,26,0.15)'
     editor.querySelectorAll<HTMLElement>('mark').forEach(m => {
       const rules = (m.getAttribute('data-rules') ?? '').split(',')
       if (rules.includes(hoveredRuleId)) {
         m.style.opacity = '1'
         m.style.color = '#1a1a1a'
+        if (hoveredRule && !m.dataset.hoverOverridden) {
+          m.dataset.hoverOverridden = '1'
+          m.dataset.origBg = m.style.background
+          m.dataset.origBorderBottom = m.style.borderBottom
+          m.style.background = hoveredRule.bgColor
+          m.style.borderBottom = `2px solid ${hoveredRule.color}`
+        }
       } else {
         m.style.opacity = '0.15'
         m.style.color = ''
       }
     })
   }, [hoveredRuleId])
+
+  const handleClear = useCallback(() => {
+    const editor = editorRef.current
+    undoStackRef.current.push(lastPushedRef.current)
+    redoStackRef.current = []
+    lastPushedRef.current = ''
+    setText('')
+    setClientViolations([])
+    setLlmViolations([])
+    setLlmStatus('idle')
+    setPopover(null)
+    setHintVisible(false)
+    if (editor) { editor.innerText = ''; editor.focus() }
+  }, [])
 
   const toggleRule = (ruleId: string) => {
     setHiddenRules(prev => {
@@ -278,7 +334,7 @@ export default function App() {
   }
 
   const wordCount = text.trim().split(/\s+/).filter(Boolean).length
-  const staleDelta = llmStatus === 'stale' ? roughCharDiff(lastAnalyzedTextRef.current, text) : 0
+  const stalePct = llmStatus === 'stale' ? stalePercent(lastAnalyzedTextRef.current, text) : 0
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#f5f5f0' }}>
@@ -288,13 +344,56 @@ export default function App() {
         onApiKeyRemove={() => { setApiKey(''); localStorage.removeItem('anthropic-api-key') }}
         onRunLLM={runLLM}
         llmStatus={llmStatus}
-        staleDelta={staleDelta}
+        stalePct={stalePct}
       />
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Main editor */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '48px 64px 80px' }}>
-          <div style={{ maxWidth: '680px', margin: '0 auto' }}>
+        <div style={{ flex: 1, overflowY: 'auto', padding: '48px 64px 80px', position: 'relative' }}>
+          <div style={{ maxWidth: '680px', margin: '0 auto', position: 'relative' }}>
+            {/* Callout box — sits in left margin, arrow points right at the text */}
+            {hintVisible !== undefined && (
+              <div style={{ position: 'absolute', right: 'calc(100% + 20px)', top: '6px', width: '158px', opacity: hintVisible ? 1 : 0, transition: 'opacity 0.5s ease', pointerEvents: hintVisible ? 'auto' : 'none' }}>
+                <div style={{
+                  background: '#fff',
+                  border: '1px solid #e0dbd4',
+                  borderRadius: '8px',
+                  padding: '12px 14px',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.07)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                }}>
+                  <div style={{ fontSize: '12px', fontWeight: '600', fontFamily: 'sans-serif', color: '#888', marginBottom: '2px' }}>
+                    ✎ Text is editable
+                  </div>
+                  <div style={{ fontSize: '11px', fontFamily: 'sans-serif', color: '#aaa', lineHeight: '1.5' }}>
+                    Paste or type your own text to analyse it. The sample shows what detections look like.
+                  </div>
+                  {text.trim() && <button
+                    onClick={handleClear}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      padding: 0,
+                      fontSize: '11px',
+                      fontFamily: 'sans-serif',
+                      color: '#bbb',
+                      cursor: 'pointer',
+                      textDecoration: 'underline',
+                      textUnderlineOffset: '2px',
+                      display: 'block',
+                      textAlign: 'left',
+                    }}
+                  >
+                    Clear text
+                  </button>}
+                </div>
+                {/* Arrow pointing right */}
+                <div style={{ position: 'absolute', right: '-8px', top: '18px', width: 0, height: 0, borderTop: '7px solid transparent', borderBottom: '7px solid transparent', borderLeft: '8px solid #e0dbd4' }} />
+                <div style={{ position: 'absolute', right: '-7px', top: '18px', width: 0, height: 0, borderTop: '7px solid transparent', borderBottom: '7px solid transparent', borderLeft: '8px solid #fff' }} />
+              </div>
+            )}
             {llmError && (
               <div style={{
                 marginBottom: '16px', padding: '10px 14px',
@@ -303,6 +402,24 @@ export default function App() {
                 fontFamily: 'sans-serif',
               }}>
                 API error: {llmError}
+              </div>
+            )}
+            {!text.trim() && (
+              <div style={{
+                position: 'absolute',
+                top: 0,
+                left: 0,
+                pointerEvents: 'none',
+                fontSize: '18px',
+                lineHeight: '1.9',
+                fontFamily: "'Georgia', 'Times New Roman', serif",
+                color: '#ccc',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+              }}>
+                <span style={{ fontSize: '22px', opacity: 0.4 }}>✏</span>
+                Write here…
               </div>
             )}
             <div
@@ -365,21 +482,18 @@ function saveCaretPosition(root: Node): number | null {
   if (!sel || sel.rangeCount === 0) return null
   const { startContainer, startOffset } = sel.getRangeAt(0)
 
-  // Element container: count content of first startOffset children
-  if (startContainer.nodeType !== Node.TEXT_NODE) {
-    let count = 0
-    for (let i = 0; i < startOffset; i++) {
-      count += nodeCharLen(startContainer.childNodes[i])
-    }
-    return count
-  }
-
-  // Text node container: walk tree counting chars+BRs until we hit it
+  // Walk the tree counting chars+BRs until we reach startContainer,
+  // then add the offset within it. Handles both text-node and element containers.
   let count = 0
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
   let node: Node | null
   while ((node = walker.nextNode())) {
-    if (node === startContainer) return count + startOffset
+    if (node === startContainer) {
+      if (node.nodeType === Node.TEXT_NODE) return count + startOffset
+      // Element container (e.g. caret in a <div> or <mark>): count children before offset
+      for (let i = 0; i < startOffset; i++) count += nodeCharLen(startContainer.childNodes[i])
+      return count
+    }
     if (node.nodeType === Node.TEXT_NODE) count += (node.textContent ?? '').length
     else if ((node as Element).tagName === 'BR') count += 1
   }
@@ -437,6 +551,27 @@ function restoreCaretPosition(root: Node, offset: number) {
   sel.addRange(range)
 }
 
+// Levenshtein distance with early exit once distance exceeds maxDist
+// @ts-expect-error — kept for future fuzzy matching (see commented block above)
+function boundedLevenshtein(a: string, b: string, maxDist: number): number {
+  if (Math.abs(a.length - b.length) > maxDist) return maxDist + 1
+  const n = a.length, m = b.length
+  const row = Array.from({ length: m + 1 }, (_, i) => i)
+  for (let i = 1; i <= n; i++) {
+    let prev = i
+    let rowMin = prev
+    for (let j = 1; j <= m; j++) {
+      const val = a[i - 1] === b[j - 1] ? row[j - 1] : Math.min(row[j - 1], row[j], prev) + 1
+      row[j - 1] = prev
+      prev = val
+      rowMin = Math.min(rowMin, val)
+    }
+    row[m] = prev
+    if (rowMin > maxDist) return maxDist + 1
+  }
+  return row[m]
+}
+
 function cleanupAfterEdit(text: string): string {
   return text
     // space(s) before sentence-ending punctuation
@@ -449,14 +584,15 @@ function cleanupAfterEdit(text: string): string {
     .replace(/\n /g, '\n')
 }
 
-// Rough size of the changed region between two strings — O(n) start/end scan
-function roughCharDiff(a: string, b: string): number {
+// Percent of text that has changed since last LLM run (0–100), rounded to nearest 5
+function stalePercent(a: string, b: string): number {
   if (a === b) return 0
+  const maxLen = Math.max(a.length, b.length, 1)
+  const lenDiff = Math.abs(a.length - b.length)
   let start = 0
   while (start < a.length && start < b.length && a[start] === b[start]) start++
-  let endA = a.length - 1
-  let endB = b.length - 1
-  while (endA >= start && endB >= start && a[endA] === b[endB]) { endA--; endB-- }
-  return Math.max(endA - start + 1, endB - start + 1)
+  let endA = a.length - 1, endB = b.length - 1
+  while (endA > start && endB > start && a[endA] === b[endB]) { endA--; endB-- }
+  const changed = Math.max(lenDiff, Math.min(endA - start + 1, endB - start + 1, maxLen))
+  return Math.min(100, Math.round(changed / maxLen * 20) * 5)
 }
-

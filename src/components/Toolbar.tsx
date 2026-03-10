@@ -8,7 +8,7 @@ interface Props {
   onApiKeyRemove: () => void
   onRunLLM: () => void
   llmStatus: 'idle' | 'loading' | 'done' | 'stale' | 'error'
-  staleDelta: number
+  stalePct: number
 }
 
 function usePopover() {
@@ -83,7 +83,7 @@ function PopoverBox({ popoverRef, btnRef, children }: {
 }
 
 export default function Toolbar({
-  apiKey, onApiKeyChange, onApiKeyRemove, onRunLLM, llmStatus, staleDelta,
+  apiKey, onApiKeyChange, onApiKeyRemove, onRunLLM, llmStatus, stalePct,
 }: Props) {
   const [showKeyInput, setShowKeyInput] = useState(false)
   const [keyDraft, setKeyDraft] = useState('')
@@ -126,9 +126,7 @@ export default function Toolbar({
               borderRadius: '5px', padding: '4px 12px', cursor: 'pointer',
               fontSize: '12px', fontFamily: 'sans-serif', color: '#92400e', fontWeight: '500',
             }}>
-              Re-analyze <span style={{ fontWeight: '400', opacity: 0.75 }}>
-                (~{staleDelta} char{staleDelta === 1 ? '' : 's'} changed)
-              </span>
+              Re-analyze{stalePct > 0 && <span style={{ fontWeight: '400', opacity: 0.75 }}> (~{stalePct}% changed)</span>}
             </button>
           ) : llmStatus === 'done' ? (
             <span style={{ fontSize: '12px', color: '#16a34a', fontFamily: 'sans-serif' }}>Semantic analysis done</span>
