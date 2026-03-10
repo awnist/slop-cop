@@ -5,6 +5,7 @@ interface Props {
   violations: Violation[]
   hiddenRules: Set<string>
   onToggleRule: (ruleId: string) => void
+  onRuleHover: (ruleId: string | null) => void
   wordCount: number
   hasApiKey: boolean
   llmStatus: 'idle' | 'loading' | 'done' | 'stale' | 'error'
@@ -22,7 +23,7 @@ const CATEGORY_ORDER: ViolationCategory[] = [
   'sentence-structure', 'word-choice', 'rhetorical', 'framing', 'structural',
 ]
 
-export default function Sidebar({ violations, hiddenRules, onToggleRule, wordCount, hasApiKey, llmStatus }: Props) {
+export default function Sidebar({ violations, hiddenRules, onToggleRule, onRuleHover, wordCount, hasApiKey, llmStatus }: Props) {
   const countByRule = new Map<string, number>()
   for (const v of violations) {
     countByRule.set(v.ruleId, (countByRule.get(v.ruleId) ?? 0) + 1)
@@ -33,8 +34,8 @@ export default function Sidebar({ violations, hiddenRules, onToggleRule, wordCou
   // Group rules by category, only show rules with hits (or LLM rules if unlocked)
   const byCategory = new Map<ViolationCategory, typeof RULES>()
   for (const rule of RULES) {
-    if (rule.requiresLLM && !hasApiKey) continue
     const count = countByRule.get(rule.id) ?? 0
+    if (rule.requiresLLM && !hasApiKey && count === 0) continue
     if (count === 0) continue
     if (!byCategory.has(rule.category)) byCategory.set(rule.category, [])
     byCategory.get(rule.category)!.push(rule)
@@ -90,6 +91,8 @@ export default function Sidebar({ violations, hiddenRules, onToggleRule, wordCou
                 return (
                   <div
                     key={rule.id}
+                    onMouseEnter={() => onRuleHover(rule.id)}
+                    onMouseLeave={() => onRuleHover(null)}
                     style={{
                       background: hidden ? '#f8f8f8' : rule.bgColor,
                       borderLeft: `4px solid ${hidden ? '#ddd' : rule.color}`,
@@ -101,6 +104,7 @@ export default function Sidebar({ violations, hiddenRules, onToggleRule, wordCou
                       marginBottom: '4px',
                       opacity: hidden ? 0.5 : 1,
                       transition: 'opacity 0.15s',
+                      cursor: 'default',
                     }}
                   >
                     {/* Count badge */}

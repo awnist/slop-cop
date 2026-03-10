@@ -108,9 +108,9 @@ export default function Toolbar({
       flexShrink: 0,
       boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
     }}>
-      <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: '700', fontFamily: 'sans-serif', color: '#1a1a1a', marginRight: '12px' }}>
+      <span style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '15px', fontWeight: '700', color: '#1a1a1a', marginRight: '12px' }}>
         <img src={logoUrl} alt="" style={{ width: '28px', height: '28px' }} />
-        Slop Cop
+        <span style={{ fontFamily: 'Menlo, Consolas, Monaco, "Adwaita Mono", "Liberation Mono", "Lucida Console", monospace' }}>Slop Cop</span>
       </span>
 
       <div style={{ flex: 1 }} />

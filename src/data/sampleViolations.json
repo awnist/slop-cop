@@ -1,0 +1,66 @@
+[
+  {
+    "ruleId": "throat-clearing",
+    "startIndex": 0,
+    "endIndex": 257,
+    "matchedText": "In an era of unprecedented digital transformation, it is crucial to understand the multifaceted landscape of modern technology. This comprehensive overview will delve into the robust frameworks that fundamentally shape how we navigate these complex systems.",
+    "explanation": "This opening paragraph uses vague, generic language and could be deleted without loss of content; it establishes no concrete point and merely signals that analysis is coming.",
+    "suggestedChange": ""
+  },
+  {
+    "ruleId": "triple-construction",
+    "startIndex": 439,
+    "endIndex": 526,
+    "matchedText": "it streamlines operations, fosters collaboration, and leverages existing infrastructure",
+    "explanation": "Three parallel items (streamlines operations, fosters collaboration, leverages existing infrastructure) in exact grammatical parallel form.",
+    "suggestedChange": "it streamlines operations and fosters collaboration"
+  },
+  {
+    "ruleId": "balanced-take",
+    "startIndex": 602,
+    "endIndex": 697,
+    "matchedText": "these innovations are not without their challenges—but the opportunities far outweigh the risks",
+    "explanation": "The sentence concedes challenges then immediately negates the concession, leaving no substantive point standing.",
+    "suggestedChange": "these innovations face real challenges that require careful management"
+  },
+  {
+    "ruleId": "grandiose-stakes",
+    "startIndex": 949,
+    "endIndex": 1056,
+    "matchedText": "This analysis has broader implications for how we think about technology, society, and the human condition.",
+    "explanation": "The claim inflates ordinary observations about technology adoption to world-historical significance without substantiation.",
+    "suggestedChange": "This analysis applies to technology adoption strategies."
+  },
+  {
+    "ruleId": "false-vulnerability",
+    "startIndex": 1057,
+    "endIndex": 1150,
+    "matchedText": "It is important to note that these are merely observations, and the actual outcomes may vary.",
+    "explanation": "Performative hedging that sounds like staged caution rather than genuine uncertainty; the phrase 'it is important to note' adds no real value.",
+    "suggestedChange": "These are observations subject to change."
+  },
+  {
+    "ruleId": "pivot-paragraph",
+    "startIndex": 1151,
+    "endIndex": 1239,
+    "matchedText": "Perhaps, arguably, one might say that we are, seemingly, at a pivotal moment in history.",
+    "explanation": "A single sentence containing only empty hedging language and no new information; it transitions without contributing content.",
+    "suggestedChange": ""
+  },
+  {
+    "ruleId": "fractal-summaries",
+    "startIndex": 128,
+    "endIndex": 257,
+    "matchedText": "This comprehensive overview will delve into the robust frameworks that fundamentally shape how we navigate these complex systems.",
+    "explanation": "This sentence previews content without delivering any of it, functioning as pure structural signposting rather than substantive claim.",
+    "suggestedChange": ""
+  },
+  {
+    "ruleId": "one-point-dilution",
+    "startIndex": 760,
+    "endIndex": 947,
+    "matchedText": "Companies that utilize these tools will thrive; those that fail to commence their digital transformation journey will struggle. At the end of the day, success depends on embracing change.",
+    "explanation": "This restates the same adapt-or-fail claim already made with 'we must adapt,' adding no new information or nuance.",
+    "suggestedChange": ""
+  }
+]

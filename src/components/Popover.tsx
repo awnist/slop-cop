@@ -2,15 +2,19 @@ import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
 import type { ViolationRule } from '../types'
 
-export interface PopoverState {
-  rules: ViolationRule[]
-  anchorRect: DOMRect
-  ruleIndex: number
+export interface PopoverViolationData {
   startIndex: number
   endIndex: number
   matchedText: string
   explanation?: string
   suggestedChange?: string
+}
+
+export interface PopoverState {
+  rules: ViolationRule[]
+  violations: PopoverViolationData[]
+  anchorRect: DOMRect
+  ruleIndex: number
 }
 
 interface Props {
@@ -81,8 +85,9 @@ function InlineDiff({ before, after }: { before: string; after: string }) {
 const POPOVER_WIDTH = 380
 
 export default function Popover({ state, onClose, onApply, onNextRule, onPrevRule }: Props) {
-  const { rules, anchorRect, ruleIndex, startIndex, endIndex, suggestedChange, explanation } = state
+  const { rules, violations, anchorRect, ruleIndex } = state
   const rule = rules[ruleIndex]
+  const { startIndex, endIndex, matchedText, explanation, suggestedChange } = violations[ruleIndex] ?? violations[0]
   const popoverRef = useRef<HTMLDivElement>(null)
 
   const top = anchorRect.bottom + window.scrollY + 8
@@ -168,7 +173,7 @@ export default function Popover({ state, onClose, onApply, onNextRule, onPrevRul
               <div style={{ fontSize: '10px', fontFamily: 'sans-serif', textTransform: 'uppercase', letterSpacing: '0.08em', color: '#aaa', marginBottom: '6px', fontWeight: '600' }}>
                 Suggested change
               </div>
-              <InlineDiff before={state.matchedText} after={effectiveSuggestion} />
+              <InlineDiff before={matchedText} after={effectiveSuggestion} />
             </div>
           )
         })()}

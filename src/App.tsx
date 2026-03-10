@@ -8,16 +8,8 @@ import Sidebar from './components/Sidebar'
 import Toolbar from './components/Toolbar'
 import Popover, { type PopoverState } from './components/Popover'
 import { useHashText } from './hooks/useHashText'
-
-const SAMPLE_TEXT = `In an era of unprecedented digital transformation, it is crucial to understand the multifaceted landscape of modern technology. This comprehensive overview will delve into the robust frameworks that fundamentally shape how we navigate these complex systems.
-
-Artificial intelligence is changing everything. It affects jobs. It reshapes industries. It alters daily life. The implications are vast.
-
-The technology offers numerous benefits: it streamlines operations, fosters collaboration, and leverages existing infrastructure to deliver paradigm-shifting results. Furthermore, it is worth noting that these innovations are not without their challenges—but the opportunities far outweigh the risks.
-
-What does this mean for the future? It means we must adapt. Companies that utilize these tools will thrive; those that fail to commence their digital transformation journey will struggle. At the end of the day, success depends on embracing change.
-
-This analysis has broader implications for how we think about technology, society, and the human condition. It is important to note that these are merely observations, and the actual outcomes may vary. Perhaps, arguably, one might say that we are, seemingly, at a pivotal moment in history.`
+import { SAMPLE_TEXT } from './data/sampleText'
+import SAMPLE_VIOLATIONS from './data/sampleViolations.json'
 
 const DEBOUNCE_MS = 350
 
@@ -28,13 +20,19 @@ export default function App() {
     try { return decodeURIComponent(hash) } catch { return SAMPLE_TEXT }
   })
   useHashText(text)
+  const isDefaultText = !window.location.hash.slice(1)
   const [clientViolations, setClientViolations] = useState<Violation[]>([])
-  const [llmViolations, setLlmViolations] = useState<Violation[]>([])
+  const [llmViolations, setLlmViolations] = useState<Violation[]>(
+    isDefaultText ? (SAMPLE_VIOLATIONS as Violation[]) : []
+  )
   const [hiddenRules, setHiddenRules] = useState<Set<string>>(new Set())
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('anthropic-api-key') ?? '')
-  const [llmStatus, setLlmStatus] = useState<'idle' | 'loading' | 'done' | 'stale' | 'error'>('idle')
+  const [llmStatus, setLlmStatus] = useState<'idle' | 'loading' | 'done' | 'stale' | 'error'>(
+    isDefaultText ? 'done' : 'idle'
+  )
   const [llmError, setLlmError] = useState('')
   const [popover, setPopover] = useState<PopoverState | null>(null)
+  const [hoveredRuleId, setHoveredRuleId] = useState<string | null>(null)
 
   const editorRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -170,20 +168,28 @@ export default function App() {
 
     if (rules.length === 0) return
 
-    // Find the most specific matching violation for accurate indices
-    const v = violationsRef.current.find(
-      v2 => ruleIds.includes(v2.ruleId) && Math.abs(v2.startIndex - startIndex) < 5
-    )
+    // Find the matching violation for each rule — use containment so large spans
+    // (e.g. throat-clearing opener covering a whole paragraph) are found correctly
+    const violations = ruleIds.map(ruleId => {
+      const v = violationsRef.current.find(
+        v2 => v2.ruleId === ruleId && v2.startIndex <= startIndex && v2.endIndex >= endIndex
+      ) ?? violationsRef.current.find(
+        v2 => v2.ruleId === ruleId && Math.abs(v2.startIndex - startIndex) < 20
+      )
+      return {
+        startIndex: v?.startIndex ?? startIndex,
+        endIndex: v?.endIndex ?? endIndex,
+        matchedText: v?.matchedText ?? matchedText,
+        explanation: v?.explanation,
+        suggestedChange: v?.suggestedChange,
+      }
+    })
 
     setPopover({
       rules,
+      violations,
       anchorRect: mark.getBoundingClientRect(),
       ruleIndex: 0,
-      startIndex: v?.startIndex ?? startIndex,
-      endIndex: v?.endIndex ?? endIndex,
-      matchedText: v?.matchedText ?? matchedText,
-      explanation: v?.explanation,
-      suggestedChange: v?.suggestedChange,
     })
   }, [])
 
@@ -235,6 +241,31 @@ export default function App() {
       .catch(e => { errors.push(e instanceof Error ? e.message : String(e)) })
       .finally(oneDone)
   }, [apiKey, text])
+
+  // Dim all text and non-matching marks when hovering a sidebar rule
+  useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    if (!hoveredRuleId) {
+      editor.style.color = ''
+      editor.querySelectorAll<HTMLElement>('mark').forEach(m => {
+        m.style.opacity = ''
+        m.style.color = ''
+      })
+      return
+    }
+    editor.style.color = 'rgba(26,26,26,0.15)'
+    editor.querySelectorAll<HTMLElement>('mark').forEach(m => {
+      const rules = (m.getAttribute('data-rules') ?? '').split(',')
+      if (rules.includes(hoveredRuleId)) {
+        m.style.opacity = '1'
+        m.style.color = '#1a1a1a'
+      } else {
+        m.style.opacity = '0.15'
+        m.style.color = ''
+      }
+    })
+  }, [hoveredRuleId])
 
   const toggleRule = (ruleId: string) => {
     setHiddenRules(prev => {
@@ -304,6 +335,7 @@ export default function App() {
           violations={allViolations}
           hiddenRules={hiddenRules}
           onToggleRule={toggleRule}
+          onRuleHover={setHoveredRuleId}
           wordCount={wordCount}
           hasApiKey={!!apiKey}
           llmStatus={llmStatus}

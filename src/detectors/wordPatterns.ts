@@ -225,8 +225,8 @@ export function detectNegationPivot(text: string): Violation[] {
   const NEGATIONS = `not|don[\u2019']?t|doesn[\u2019']?t|isn[\u2019']?t|wasn[\u2019']?t|aren[\u2019']?t|do not|does not|is not|was not|never|no longer`
   // "not X, but Y" / "not X but Y" (comma optional)
   const commaButRe = new RegExp(`\\b(${NEGATIONS})\\b[^.!?\\n]{3,80},?\\s+but\\b`, 'gi')
-  // "not X—Y" or "not X–Y" (em/en-dash pivot without "but")
-  const emDashRe = new RegExp(`\\b(${NEGATIONS})\\b[^.!?\\n\u2014\u2013]{3,60}[\u2014\u2013]`, 'gi')
+  // "not X—Y" or "not X–Y" (em/en-dash pivot without "but") — capture one word after dash for clarity
+  const emDashRe = new RegExp(`\\b(${NEGATIONS})\\b[^.!?\\n\u2014\u2013]{3,60}[\u2014\u2013]\\s*\\w+`, 'gi')
   let m: RegExpExecArray | null
   for (const re of [commaButRe, emDashRe]) {
     while ((m = re.exec(text)) !== null) {
