@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:llm": "vitest run --reporter=verbose src/detectors/__tests__/llmDetectors.test.ts",
+    "test:llm": "vitest run --reporter=verbose --config vitest.llm.config.ts",
     "seed": "npx tsx scripts/seed-sample-violations.ts",
     "deploy": "pnpm build && npx wrangler pages deploy dist --project-name slopcop",
     "deploy:router": "cd router && npx wrangler deploy"
