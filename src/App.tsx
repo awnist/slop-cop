@@ -479,7 +479,7 @@ export default function App() {
           <div ref={editorWrapperRef} style={{ maxWidth: '680px', margin: '0 auto', position: 'relative' }}>
             {/* Callout box — sits in left margin, arrow points right at the text */}
             {hintVisible !== undefined && (
-              <div ref={hintRef} className="hint-callout" style={{ position: 'absolute', right: 'calc(100% - 39px)', top: '6px', width: '158px', opacity: hintDimmed ? 0.15 : hintVisible ? 1 : 0, transition: 'opacity 0.3s ease', pointerEvents: hintVisible && !hintDimmed ? 'auto' : 'none' }}>
+              <div ref={hintRef} className="hint-callout" style={{ position: 'absolute', right: 'calc(100% - 39px)', top: '6px', width: '158px', opacity: !hintVisible ? 0 : hintDimmed ? 0.15 : 1, transition: 'opacity 0.3s ease', pointerEvents: hintVisible && !hintDimmed ? 'auto' : 'none' }}>
                 <div style={{
                   background: '#fff',
                   border: '1px solid #e0dbd4',
@@ -550,6 +550,7 @@ export default function App() {
             )}
             <div
               ref={editorRef}
+              className="editor-content"
               contentEditable
               suppressContentEditableWarning
               onInput={handleInput}
@@ -568,7 +569,7 @@ export default function App() {
                 caretColor: '#1a1a1a',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
-                paddingLeft: '52px', // left padding houses the sparkle button (at left+10)
+                paddingLeft: '52px', // left padding houses the sparkle button; overridden to 8px on mobile via .editor-content
               }}
             />
           </div>

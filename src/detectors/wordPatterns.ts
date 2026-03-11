@@ -205,10 +205,14 @@ export function detectUnnecessaryContrast(text: string): Violation[] {
 export function detectEmDashPivot(text: string): Violation[] {
   const violations: Violation[] = []
 
-  // Find each em-dash or en-dash independently
+  // Find each em-dash or en-dash, but skip ones used as a standalone line separator
   const re = /[—–]/g
   let m: RegExpExecArray | null
   while ((m = re.exec(text)) !== null) {
+    const lineStart = text.lastIndexOf('\n', m.index - 1) + 1
+    const lineEnd = text.indexOf('\n', m.index)
+    const line = text.slice(lineStart, lineEnd === -1 ? undefined : lineEnd)
+    if (line.trim().replace(/[—–]/g, '').trim() === '') continue
     violations.push({
       ruleId: 'em-dash-pivot',
       startIndex: m.index,
@@ -726,7 +730,7 @@ export function detectDramaticFragment(text: string): Violation[] {
   for (const para of splitParagraphs(text)) {
     const trimmed = para.text.trim()
     const wordCount = trimmed.split(/\s+/).filter(Boolean).length
-    if (wordCount >= 1 && wordCount <= 4) {
+    if (wordCount >= 1 && wordCount <= 4 && !trimmed.endsWith(':')) {
       violations.push({
         ruleId: 'dramatic-fragment',
         startIndex: para.start,

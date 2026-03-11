@@ -1,4 +1,10 @@
-export const SAMPLE_TEXT = `In an era of unprecedented digital transformation, it is crucial to understand the multifaceted landscape of modern technology. This comprehensive overview will delve into the robust frameworks that fundamentally shape how we navigate these complex systems.
+export const SAMPLE_TEXT = `Slop Cop is a writing editor that flags the rhetorical and structural patterns often found in generic LLM prose, then highlights them in real time for revision.
+
+It runs entirely in the browser, and you can optionally add an Anthropic API key to run deeper analysis and enable auto-edits.
+
+Here's an example:
+
+In an era of unprecedented digital transformation, it is crucial to understand the multifaceted landscape of modern technology. This comprehensive overview will delve into the robust frameworks that fundamentally shape how we navigate these complex systems.
 
 Artificial intelligence is changing everything. It affects jobs. It reshapes industries. It alters daily life. The implications are vast.
 
