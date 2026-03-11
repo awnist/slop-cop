@@ -20,7 +20,7 @@ Detection runs in two tiers:
 
 **Semantic (optional):** Two parallel calls to the Anthropic API, triggered manually:
 
-- *Fast pass* — Claude Haiku (~5s): sentence and paragraph-level patterns that require language understanding (triple construction, sycophantic framing, unnecessary elaboration, etc.)
+- *Fast pass* — Claude Haiku (~5s): sentence and paragraph-level patterns that require language understanding (triple construction, sycophantic framing, unnecessary elaboration, etc.). Large documents are automatically split into overlapping chunks and analyzed in parallel for better coverage.
 - *Deep pass* — Claude Sonnet (~15s): document-level patterns only visible at scale (dead metaphor repetition, one-point dilution, fractal summaries)
 
 API calls go directly from your browser to Anthropic. No server. Your key is stored in `localStorage` and never leaves your machine.
@@ -53,7 +53,7 @@ API calls go directly from your browser to Anthropic. No server. Your key is sto
 | Listicle Instinct         | Bullet or numbered lists with exactly 3, 5, or 7 items                                                                |
 | "Serves As" Dodge         | `serves as`, `stands as`, `acts as`, `functions as`                                                                   |
 | "Not X. Not Y. Just Z."   | Consecutive negation sentences building to a reveal                                                                   |
-| Anaphora Abuse            | Three or more consecutive sentences with the same two-word opener                                                     |
+| Anaphora Abuse            | Three or more consecutive sentences with the same opener — any non-function word (single or two-word); leading conjunctions like "And" stripped before matching |
 | Gerund Fragment Litany    | Consecutive short sentences starting with gerunds                                                                     |
 | "Here's the Kicker"       | `Here's the thing`, `Here's the kicker`, `Here's where it gets interesting`                                           |
 | Pedagogical Aside         | `Let's break this down`, `Let's unpack`, `Think of it as`                                                             |
@@ -83,7 +83,7 @@ Dead Metaphor · One-Point Dilution · Fractal Summaries
 pnpm install
 pnpm dev        # localhost:5173
 pnpm build      # type-check + production build
-pnpm test       # client-side unit tests (189 tests, no API key needed)
+pnpm test       # client-side unit tests (199 tests, no API key needed)
 pnpm test:llm   # LLM integration tests (requires ANTHROPIC_API_KEY in .env)
 ```
 
