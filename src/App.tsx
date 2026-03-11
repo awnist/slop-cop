@@ -38,6 +38,7 @@ export default function App() {
 
   const editorRef = useRef<HTMLDivElement>(null)
   const editorWrapperRef = useRef<HTMLDivElement>(null)
+  const editorScrollRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isComposingRef = useRef(false)
   const isTypingRef = useRef(false)
@@ -326,6 +327,22 @@ export default function App() {
         m.style.color = ''
       }
     })
+
+    // Scroll a matching mark into view if none are currently visible
+    const scroll = editorScrollRef.current
+    if (!scroll) return
+    const matchingMarks = Array.from(
+      editor.querySelectorAll<HTMLElement>('mark')
+    ).filter(m => (m.getAttribute('data-rules') ?? '').split(',').includes(hoveredRuleId))
+    if (matchingMarks.length === 0) return
+    const scrollRect = scroll.getBoundingClientRect()
+    const anyVisible = matchingMarks.some(m => {
+      const r = m.getBoundingClientRect()
+      return r.bottom > scrollRect.top && r.top < scrollRect.bottom
+    })
+    if (!anyVisible) {
+      matchingMarks[0].scrollIntoView({ behavior: 'smooth', block: 'center' })
+    }
   }, [hoveredRuleId])
 
   // Dim the hint callout when the rewrite button overlaps it vertically
@@ -471,6 +488,7 @@ export default function App() {
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Main editor */}
         <div
+          ref={editorScrollRef}
           className="editor-scroll"
           style={{ flex: 1, overflowY: 'auto', padding: '48px 64px 80px', position: 'relative' }}
           onMouseMove={handleEditorMouseMove}
