@@ -349,11 +349,11 @@ export default function App() {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Main editor */}
-        <div style={{ flex: 1, overflowY: 'auto', padding: '48px 64px 80px', position: 'relative' }}>
+        <div className="editor-scroll" style={{ flex: 1, overflowY: 'auto', padding: '48px 64px 80px', position: 'relative' }}>
           <div style={{ maxWidth: '680px', margin: '0 auto', position: 'relative' }}>
             {/* Callout box — sits in left margin, arrow points right at the text */}
             {hintVisible !== undefined && (
-              <div style={{ position: 'absolute', right: 'calc(100% + 20px)', top: '6px', width: '158px', opacity: hintVisible ? 1 : 0, transition: 'opacity 0.5s ease', pointerEvents: hintVisible ? 'auto' : 'none' }}>
+              <div className="hint-callout" style={{ position: 'absolute', right: 'calc(100% + 20px)', top: '6px', width: '158px', opacity: hintVisible ? 1 : 0, transition: 'opacity 0.5s ease', pointerEvents: hintVisible ? 'auto' : 'none' }}>
                 <div style={{
                   background: '#fff',
                   border: '1px solid #e0dbd4',

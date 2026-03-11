@@ -42,3 +42,26 @@ mark {
 .btn-throb {
   animation: throb 1.8s ease-in-out infinite;
 }
+
+/* ── Responsive layout ────────────────────────────────────────────────────── */
+
+.violations-sidebar {
+  display: flex;
+}
+
+/* Hide left callout when viewport is too narrow for it to fit */
+@media (max-width: 1150px) {
+  .hint-callout {
+    display: none;
+  }
+}
+
+/* Hide right sidebar and tighten editor padding on small screens */
+@media (max-width: 860px) {
+  .violations-sidebar {
+    display: none !important;
+  }
+  .editor-scroll {
+    padding: 32px 24px 60px;
+  }
+}

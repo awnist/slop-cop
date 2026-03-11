@@ -42,13 +42,12 @@ export default function Sidebar({ violations, hiddenRules, onToggleRule, onRuleH
   }
 
   return (
-    <div style={{
+    <div className="violations-sidebar" style={{
       width: '260px',
       flexShrink: 0,
       borderLeft: '1px solid #e0e0e0',
       background: '#fff',
       overflowY: 'auto',
-      display: 'flex',
       flexDirection: 'column',
     }}>
       {/* Stats header */}
