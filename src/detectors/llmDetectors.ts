@@ -173,6 +173,45 @@ async function callAnthropic(
   return data.content.find(b => b.type === 'text')?.text ?? '[]'
 }
 
+// ── Chunking for large documents ─────────────────────────────────────────────
+// Haiku misses patterns when given very long texts. Above CHUNK_THRESHOLD we
+// split on paragraph boundaries, run chunks in parallel, then merge results.
+// parseViolations always receives the full text so indexOf finds correct offsets.
+
+const CHUNK_THRESHOLD = 4000 // chars; below this, single call
+const CHUNK_SIZE = 3500      // target chars per chunk
+
+function chunkText(text: string): string[] {
+  if (text.length <= CHUNK_THRESHOLD) return [text]
+  const paragraphs = text.split(/\n\n+/)
+  const chunks: string[] = []
+  let current: string[] = []
+  let len = 0
+  for (let i = 0; i < paragraphs.length; i++) {
+    current.push(paragraphs[i])
+    len += paragraphs[i].length + 2
+    if (len >= CHUNK_SIZE && i < paragraphs.length - 1) {
+      chunks.push(current.join('\n\n'))
+      // Overlap: repeat last paragraph at start of next chunk so patterns
+      // at the boundary aren't missed
+      current = [paragraphs[i]]
+      len = paragraphs[i].length + 2
+    }
+  }
+  if (current.length) chunks.push(current.join('\n\n'))
+  return chunks
+}
+
+function deduplicateViolations(violations: Violation[]): Violation[] {
+  const seen = new Set<string>()
+  return violations.filter(v => {
+    const key = `${v.ruleId}:${v.matchedText}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
 // Fragment-level patterns — fast, uses Haiku
 export async function runLLMDetectors(
   text: string,
@@ -180,14 +219,31 @@ export async function runLLMDetectors(
   onProgress?: (msg: string) => void,
 ): Promise<Violation[]> {
   onProgress?.('Analyzing with Claude Haiku (sentence patterns)...')
-  const raw = await callAnthropic(
-    apiKey,
-    'claude-haiku-4-5-20251001',
-    SYSTEM_PROMPT,
-    `${LLM_RULES_PROMPT}\n\nText to analyze:\n\n${text}`,
-    30_000,
+  const chunks = chunkText(text)
+  if (chunks.length === 1) {
+    const raw = await callAnthropic(
+      apiKey,
+      'claude-haiku-4-5-20251001',
+      SYSTEM_PROMPT,
+      `${LLM_RULES_PROMPT}\n\nText to analyze:\n\n${text}`,
+      30_000,
+    )
+    return parseViolations(text, raw)
+  }
+  const results = await Promise.all(
+    chunks.map(chunk =>
+      callAnthropic(
+        apiKey,
+        'claude-haiku-4-5-20251001',
+        SYSTEM_PROMPT,
+        `${LLM_RULES_PROMPT}\n\nText to analyze:\n\n${chunk}`,
+        30_000,
+      )
+        .then(raw => parseViolations(text, raw))
+        .catch(() => [] as Violation[])
+    )
   )
-  return parseViolations(text, raw)
+  return deduplicateViolations(results.flat())
 }
 
 // Document-level patterns — deeper, uses Sonnet

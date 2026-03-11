@@ -576,6 +576,29 @@ describe('detectAnaphoraAbuse', () => {
   it('does NOT flag 2 consecutive matching openers', () => {
     assertSilent(detectAnaphoraAbuse('They assume the worst. They assume nothing. The data is clear.'), 'anaphora-abuse')
   })
+  it('flags 3+ sentences opening with a curated single word (both)', () => {
+    assertFires(detectAnaphoraAbuse('Both can be difficult to understand. Both are active at all hours. Both connect distant things.'), 'anaphora-abuse')
+  })
+  it('flags curated single word with 4 sentences (each)', () => {
+    assertFires(detectAnaphoraAbuse('Each decision matters. Each voice counts. Each moment shapes the outcome. Each choice defines us.'), 'anaphora-abuse')
+  })
+  it('does NOT flag 2 consecutive curated single-word openers', () => {
+    assertSilent(detectAnaphoraAbuse('Both can be difficult. Both are active. The third is different.'), 'anaphora-abuse')
+  })
+  it('flags any non-function-word repeated opener (people, his, this)', () => {
+    assertFires(detectAnaphoraAbuse('People often forget. People make mistakes. People learn slowly.'), 'anaphora-abuse')
+    assertFires(detectAnaphoraAbuse('His argument was X. His evidence was Y. His conclusion was Z.'), 'anaphora-abuse')
+    assertFires(detectAnaphoraAbuse('This is foo. This is bar. And this is baz.'), 'anaphora-abuse')
+  })
+  it('does NOT flag articles or prepositions', () => {
+    assertSilent(detectAnaphoraAbuse('In the beginning. In the middle. In the end.'), 'anaphora-abuse')
+  })
+  it('treats "And {word}" as matching the base opener', () => {
+    assertFires(detectAnaphoraAbuse('Both can be difficult. Both are active. Both connect things. And both produce alarm.'), 'anaphora-abuse')
+  })
+  it('treats "And {two words}" as matching the base two-word opener', () => {
+    assertFires(detectAnaphoraAbuse('They assume the worst. They assume silence means guilt. And they assume nothing will change.'), 'anaphora-abuse')
+  })
 })
 
 // ── Gerund Litany ──────────────────────────────────────────────────────────

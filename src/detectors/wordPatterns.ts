@@ -498,6 +498,13 @@ export function detectNegationCountdown(text: string): Violation[] {
   return violations
 }
 
+// Function words too generic to flag as anaphora — anything else repeated 3+ times is suspicious
+const ANAPHORA_SINGLE_WORD_SKIP = new Set([
+  'a', 'an', 'the',
+  'in', 'on', 'at', 'to', 'of', 'for', 'with', 'by', 'from',
+  'is', 'are', 'was', 'were',
+])
+
 export function detectAnaphoraAbuse(text: string): Violation[] {
   const violations: Violation[] = []
   const sentences = splitSentences(text)
@@ -505,8 +512,19 @@ export function detectAnaphoraAbuse(text: string): Violation[] {
   const offsets: number[] = []
   for (const s of sentences) { offsets.push(offset); offset += s.length }
 
-  function twoWordOpener(s: string): string {
+  const CONJUNCTIONS = new Set(['and', 'but', 'or'])
+
+  function normalize(s: string): string[] {
     const words = s.trim().split(/\s+/).filter(Boolean)
+    // Strip a leading conjunction ("And both..." → ["both", ...])
+    if (words.length > 1 && CONJUNCTIONS.has(words[0].toLowerCase().replace(/[^a-z]/g, ''))) {
+      return words.slice(1)
+    }
+    return words
+  }
+
+  function twoWordOpener(s: string): string {
+    const words = normalize(s)
     if (words.length < 2) return ''
     const first = words[0].toLowerCase().replace(/[^a-z]/g, '')
     const skip = new Set(['the', 'a', 'an', 'it', 'is', 'in', 'on', 'at', 'to', 'of', 'and', 'but', 'i', 'we', 'he', 'she'])
@@ -514,21 +532,38 @@ export function detectAnaphoraAbuse(text: string): Violation[] {
     return `${first} ${words[1].toLowerCase().replace(/[^a-z]/g, '')}`
   }
 
+  function singleWordOpener(s: string): string {
+    const words = normalize(s)
+    if (words.length < 2) return ''
+    const first = words[0].toLowerCase().replace(/[^a-z]/g, '')
+    if (first.length < 2 || ANAPHORA_SINGLE_WORD_SKIP.has(first)) return ''
+    return first
+  }
+
+  function flagRun(i: number, j: number, opener: string) {
+    const start = offsets[i]
+    const end = offsets[j - 1] + sentences[j - 1].length
+    violations.push({
+      ruleId: 'anaphora-abuse', startIndex: start, endIndex: end,
+      matchedText: text.slice(start, end), explanation: `"${opener}..." repeated ${j - i} times`,
+    })
+  }
+
   let i = 0
   while (i < sentences.length) {
-    const opener = twoWordOpener(sentences[i])
-    if (opener) {
+    // Two-word opener (more specific — try first)
+    const two = twoWordOpener(sentences[i])
+    if (two) {
       let j = i + 1
-      while (j < sentences.length && twoWordOpener(sentences[j]) === opener) j++
-      if (j - i >= 3) {
-        const start = offsets[i]
-        const end = offsets[j - 1] + sentences[j - 1].length
-        violations.push({
-          ruleId: 'anaphora-abuse', startIndex: start, endIndex: end,
-          matchedText: text.slice(start, end), explanation: `"${opener}..." repeated ${j - i} times`,
-        })
-        i = j; continue
-      }
+      while (j < sentences.length && twoWordOpener(sentences[j]) === two) j++
+      if (j - i >= 3) { flagRun(i, j, two); i = j; continue }
+    }
+    // Single-word opener from curated slop-indicative list
+    const one = singleWordOpener(sentences[i])
+    if (one) {
+      let j = i + 1
+      while (j < sentences.length && singleWordOpener(sentences[j]) === one) j++
+      if (j - i >= 3) { flagRun(i, j, one); i = j; continue }
     }
     i++
   }
