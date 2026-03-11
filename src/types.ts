@@ -15,6 +15,10 @@ export interface ViolationRule {
   color: string        // CSS hsl or hex
   bgColor: string      // highlight background
   requiresLLM: boolean
+  llmTier?: 'sentence' | 'document'   // which LLM call detects this rule
+  llmDetectionHint?: string           // detection description used in LLM analysis prompts
+  rewriteHint?: string                // human-readable description shown in rewrite debug panel
+  llmDirective?: string               // terse imperative sent to the model in rewrite prompts
 }
 
 export interface Violation {

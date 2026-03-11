@@ -2,11 +2,12 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { RULES, RULES_BY_ID } from './rules'
 import type { Violation } from './types'
 import { runClientDetectors } from './detectors/index'
-import { runLLMDetectors, runDocumentDetectors } from './detectors/llmDetectors'
+import { runLLMDetectors, runDocumentDetectors, rewriteParagraph, buildRewriteSystemPrompt } from './detectors/llmDetectors'
 import { buildHighlightedHTML } from './utils/buildHighlightedHTML'
 import Sidebar from './components/Sidebar'
 import Toolbar from './components/Toolbar'
 import Popover, { type PopoverState } from './components/Popover'
+import ParaRewritePopover from './components/ParaRewritePopover'
 import { useHashText } from './hooks/useHashText'
 import { SAMPLE_TEXT } from './data/sampleText'
 import SAMPLE_VIOLATIONS from './data/sampleViolations.json'
@@ -36,6 +37,7 @@ export default function App() {
   const [hintVisible, setHintVisible] = useState(true)
 
   const editorRef = useRef<HTMLDivElement>(null)
+  const editorWrapperRef = useRef<HTMLDivElement>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const isComposingRef = useRef(false)
   const isTypingRef = useRef(false)
@@ -51,6 +53,23 @@ export default function App() {
   const undoStackRef = useRef<string[]>([])
   const redoStackRef = useRef<string[]>([])
   const lastPushedRef = useRef<string>('')
+
+  // Paragraph rewrite state
+  const [hoveredPara, setHoveredPara] = useState<{
+    idx: number; text: string; start: number; end: number
+    buttonLeft: number; buttonTop: number
+  } | null>(null)
+  const [rewritePopover, setRewritePopover] = useState<{
+    paraText: string; paraStart: number; paraEnd: number
+    buttonLeft: number; buttonTop: number
+    rewritten: string | null; error: string | null; loading: boolean
+    debugPrompt: string
+    noApiKey?: boolean
+  } | null>(null)
+  const sparkleButtonRef = useRef<HTMLDivElement>(null)
+  const hintRef = useRef<HTMLDivElement>(null)
+  const [hintDimmed, setHintDimmed] = useState(false)
+  const mouseMoveThrottleRef = useRef<number>(0)
 
   // Re-resolve LLM violation positions from matchedText on every text change.
   // Violations whose text was edited away vanish naturally; others track correctly.
@@ -227,6 +246,8 @@ export default function App() {
     lastPushedRef.current = newText
     setText(newText)
     setPopover(null)
+    setHintVisible(false)
+    setLlmStatus(s => (s === 'done' || s === 'error') ? 'stale' : s)
     const editor = editorRef.current
     if (editor) editor.innerText = newText
   }, [])
@@ -237,33 +258,31 @@ export default function App() {
     lastAnalyzedTextRef.current = text
     setLlmStatus('loading')
     setLlmError('')
-    // Clear previous LLM violations before both calls start
-    setLlmViolations([])
 
+    const collected: Violation[] = []
     let pending = 2
     const errors: string[] = []
 
     const oneDone = () => {
       pending--
       if (pending === 0) {
+        // Replace violations only when both calls are complete so existing
+        // highlights stay visible during the entire re-analysis run
+        setLlmViolations(collected)
         setLlmStatus(errors.length > 0 ? 'error' : 'done')
         if (errors.length > 0) setLlmError(errors.join(' | '))
       }
     }
 
-    const appendResults = (results: Violation[]) => {
-      setLlmViolations(prev => [...prev, ...results])
-    }
-
     // Fragment call — Haiku, fast (~3–5s), sentence/paragraph patterns
     runLLMDetectors(text, apiKey)
-      .then(appendResults)
+      .then(results => { collected.push(...results) })
       .catch(e => { errors.push(e instanceof Error ? e.message : String(e)) })
       .finally(oneDone)
 
     // Document call — Sonnet, slower (~8–15s), structural/compositional patterns
     runDocumentDetectors(text, apiKey)
-      .then(appendResults)
+      .then(results => { collected.push(...results) })
       .catch(e => { errors.push(e instanceof Error ? e.message : String(e)) })
       .finally(oneDone)
   }, [apiKey, text])
@@ -309,6 +328,14 @@ export default function App() {
     })
   }, [hoveredRuleId])
 
+  // Dim the hint callout when the rewrite button overlaps it vertically
+  useEffect(() => {
+    if (!hoveredPara || !hintRef.current) { setHintDimmed(false); return }
+    const hintRect = hintRef.current.getBoundingClientRect()
+    const overlapsY = hoveredPara.buttonTop < hintRect.bottom + 4 && hoveredPara.buttonTop + 30 > hintRect.top - 4
+    setHintDimmed(overlapsY)
+  }, [hoveredPara])
+
   const handleClear = useCallback(() => {
     const editor = editorRef.current
     undoStackRef.current.push(lastPushedRef.current)
@@ -322,6 +349,100 @@ export default function App() {
     setHintVisible(false)
     if (editor) { editor.innerText = ''; editor.focus() }
   }, [])
+
+  const handleEditorMouseMove = useCallback((e: React.MouseEvent) => {
+    if (rewritePopover) return
+    const now = Date.now()
+    if (now - mouseMoveThrottleRef.current < 60) return
+    mouseMoveThrottleRef.current = now
+    const editor = editorRef.current
+    if (!editor || !textRef.current.trim()) { setHoveredPara(null); return }
+
+    const target = e.target as Node
+    // Mouse is over the sparkle button — keep current para, don't recalculate
+    if (sparkleButtonRef.current?.contains(target)) return
+    // Mouse is outside the editor content area — clear sparkle
+    if (!editor.contains(target)) { setHoveredPara(null); return }
+
+    const caretRange = document.caretRangeFromPoint(e.clientX, e.clientY)
+    if (!caretRange) { setHoveredPara(null); return }
+
+    const charOffset = getCharOffsetFromPoint(editor, caretRange.startContainer, caretRange.startOffset)
+    const para = findParagraphAtOffset(textRef.current, charOffset)
+    const paraTopY = getParagraphTopY(editor, para.start)
+    if (paraTopY === 0) { setHoveredPara(null); return }
+    // If the cursor is visually above this paragraph's first line, caretRangeFromPoint snapped
+    // to the wrong paragraph (e.g. cursor is in a blank gap above it, or past all content).
+    if (e.clientY < paraTopY - 5) { setHoveredPara(null); return }
+
+    // Button right edge (before arrow) anchors at the text start; arrow tip touches the text.
+    // paddingLeft on the editor is 52px, so text starts at editorRect.left + 52.
+    // Arrow is 8px wide, so button right edge at editorRect.left + 44.
+    // translateX(-100%) in the button JSX makes it extend leftward from this anchor.
+    const editorRect = editor.getBoundingClientRect()
+    const buttonLeft = editorRect.left + 44
+
+    setHoveredPara(prev => {
+      if (prev?.idx === para.idx && Math.abs(prev.buttonTop - paraTopY) < 2) return prev
+      return { idx: para.idx, text: para.text, start: para.start, end: para.end, buttonLeft, buttonTop: paraTopY }
+    })
+  }, [apiKey, rewritePopover])
+
+  const handleEditorMouseLeave = useCallback(() => {
+    setHoveredPara(null)
+  }, [])
+
+  const handleSparkleClick = useCallback(async () => {
+    if (!hoveredPara) return
+    const { text: paraText, start: paraStart, end: paraEnd, buttonLeft, buttonTop } = hoveredPara
+
+    if (!apiKey) {
+      setRewritePopover({ paraText, paraStart, paraEnd, buttonLeft, buttonTop, rewritten: null, error: null, loading: false, debugPrompt: '', noApiKey: true })
+      setHoveredPara(null)
+      return
+    }
+
+    // Collect rule-specific hints, citing the exact flagged text from this paragraph
+    const paraViolations = violationsRef.current.filter(
+      v => v.startIndex >= paraStart && v.endIndex <= paraEnd + 2
+    )
+    // Group by ruleId so we can list all matched instances per rule
+    const byRule = new Map<string, string[]>()
+    for (const v of paraViolations) {
+      if (!byRule.has(v.ruleId)) byRule.set(v.ruleId, [])
+      byRule.get(v.ruleId)!.push(v.matchedText.trim())
+    }
+    const ruleHints: string[] = []
+    for (const [ruleId, matches] of byRule) {
+      const hint = RULES_BY_ID[ruleId]?.rewriteHint
+      if (!hint) continue
+      const directive = RULES_BY_ID[ruleId]?.llmDirective ?? hint
+      const cited = matches
+        .slice(0, 4)
+        .map(m => `"${m.length > 70 ? m.slice(0, 70) + '…' : m}"`)
+        .join(', ')
+      ruleHints.push(`${directive} — flagged in this paragraph: ${cited}`)
+    }
+
+    const debugPrompt = buildRewriteSystemPrompt(ruleHints)
+    setRewritePopover({ paraText, paraStart, paraEnd, buttonLeft, buttonTop, rewritten: null, error: null, loading: true, debugPrompt })
+    setHoveredPara(null)
+
+    try {
+      const result = await rewriteParagraph(paraText, ruleHints, apiKey)
+      setRewritePopover(prev => prev ? { ...prev, rewritten: result, loading: false } : null)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setRewritePopover(prev => prev ? { ...prev, error: msg, loading: false } : null)
+    }
+  }, [hoveredPara, apiKey])
+
+  const applyRewrite = useCallback(() => {
+    if (!rewritePopover || rewritePopover.rewritten === null) return
+    const { paraStart, paraEnd, rewritten } = rewritePopover
+    applyTextChange(paraStart, paraEnd, rewritten)
+    setRewritePopover(null)
+  }, [rewritePopover, applyTextChange])
 
   const toggleRule = (ruleId: string) => {
     setHiddenRules(prev => {
@@ -349,11 +470,16 @@ export default function App() {
 
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Main editor */}
-        <div className="editor-scroll" style={{ flex: 1, overflowY: 'auto', padding: '48px 64px 80px', position: 'relative' }}>
-          <div style={{ maxWidth: '680px', margin: '0 auto', position: 'relative' }}>
+        <div
+          className="editor-scroll"
+          style={{ flex: 1, overflowY: 'auto', padding: '48px 64px 80px', position: 'relative' }}
+          onMouseMove={handleEditorMouseMove}
+          onMouseLeave={handleEditorMouseLeave}
+        >
+          <div ref={editorWrapperRef} style={{ maxWidth: '680px', margin: '0 auto', position: 'relative' }}>
             {/* Callout box — sits in left margin, arrow points right at the text */}
             {hintVisible !== undefined && (
-              <div className="hint-callout" style={{ position: 'absolute', right: 'calc(100% + 20px)', top: '6px', width: '158px', opacity: hintVisible ? 1 : 0, transition: 'opacity 0.5s ease', pointerEvents: hintVisible ? 'auto' : 'none' }}>
+              <div ref={hintRef} className="hint-callout" style={{ position: 'absolute', right: 'calc(100% - 39px)', top: '6px', width: '158px', opacity: hintDimmed ? 0.15 : hintVisible ? 1 : 0, transition: 'opacity 0.3s ease', pointerEvents: hintVisible && !hintDimmed ? 'auto' : 'none' }}>
                 <div style={{
                   background: '#fff',
                   border: '1px solid #e0dbd4',
@@ -442,9 +568,51 @@ export default function App() {
                 caretColor: '#1a1a1a',
                 whiteSpace: 'pre-wrap',
                 wordBreak: 'break-word',
+                paddingLeft: '52px', // left padding houses the sparkle button (at left+10)
               }}
             />
           </div>
+
+          {/* Sparkle button — child of scroll container so moving to it doesn't fire onMouseLeave */}
+          {hoveredPara && !rewritePopover && (
+            <div
+              ref={sparkleButtonRef}
+              style={{
+                position: 'fixed',
+                left: hoveredPara.buttonLeft,
+                top: hoveredPara.buttonTop,
+                transform: 'translateX(-100%)',
+                zIndex: 50,
+              }}
+            >
+              <button
+                onMouseDown={handleSparkleClick}
+                title="Rewrite this paragraph with AI"
+                style={{
+                  position: 'relative',
+                  background: '#fff',
+                  border: '1px solid #e0dbd4',
+                  borderRadius: '8px',
+                  padding: '4px 10px 4px 9px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '11px',
+                  fontFamily: 'sans-serif',
+                  color: '#666',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.07)',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                <span style={{ fontSize: '12px', lineHeight: 1 }}>✨</span>
+                <span>Rewrite</span>
+                {/* Arrow pointing right toward text, matching the hint callout style */}
+                <div style={{ position: 'absolute', right: '-8px', top: '50%', marginTop: '-6px', width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: '8px solid #e0dbd4' }} />
+                <div style={{ position: 'absolute', right: '-7px', top: '50%', marginTop: '-6px', width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: '8px solid #fff' }} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Right sidebar */}
@@ -467,6 +635,20 @@ export default function App() {
           onApply={applyTextChange}
           onNextRule={() => setPopover(p => p ? { ...p, ruleIndex: (p.ruleIndex + 1) % p.rules.length } : p)}
           onPrevRule={() => setPopover(p => p ? { ...p, ruleIndex: (p.ruleIndex - 1 + p.rules.length) % p.rules.length } : p)}
+        />
+      )}
+
+      {/* Paragraph rewrite popover */}
+      {rewritePopover && (
+        <ParaRewritePopover
+          original={rewritePopover.paraText}
+          rewritten={rewritePopover.rewritten}
+          error={rewritePopover.error}
+          debugPrompt={rewritePopover.debugPrompt}
+          buttonPos={{ left: rewritePopover.buttonLeft, top: rewritePopover.buttonTop }}
+          noApiKey={rewritePopover.noApiKey}
+          onApply={applyRewrite}
+          onDismiss={() => { setRewritePopover(null); setHoveredPara(null) }}
         />
       )}
     </div>
@@ -582,6 +764,74 @@ function cleanupAfterEdit(text: string): string {
     .replace(/  +/g, ' ')
     // space at start of a line
     .replace(/\n /g, '\n')
+}
+
+// ── Paragraph hover helpers ───────────────────────────────────────────────────
+
+// Like saveCaretPosition but works on an arbitrary range (not just current selection)
+function getCharOffsetFromPoint(editor: HTMLElement, container: Node, offset: number): number {
+  let count = 0
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+  let node: Node | null
+  while ((node = walker.nextNode())) {
+    if (node === container) {
+      if (node.nodeType === Node.TEXT_NODE) return count + offset
+      for (let i = 0; i < offset; i++) count += nodeCharLen(container.childNodes[i])
+      return count
+    }
+    if (node.nodeType === Node.TEXT_NODE) count += (node.textContent ?? '').length
+    else if ((node as Element).tagName === 'BR') count += 1
+  }
+  return count
+}
+
+// Given a char offset into text, return which paragraph it falls in
+function findParagraphAtOffset(text: string, offset: number): {
+  idx: number; start: number; end: number; text: string
+} {
+  const paras = text.split('\n\n')
+  let pos = 0
+  for (let i = 0; i < paras.length; i++) {
+    const end = pos + paras[i].length
+    if (offset <= end || i === paras.length - 1) {
+      return { idx: i, start: pos, end, text: paras[i] }
+    }
+    pos = end + 2 // skip the \n\n separator
+  }
+  return { idx: 0, start: 0, end: text.length, text }
+}
+
+// Walk the editor DOM to get the viewport Y of the first character of a paragraph
+function getParagraphTopY(editor: HTMLElement, paraStart: number): number {
+  let count = 0
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+  let node: Node | null
+  while ((node = walker.nextNode())) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = (node.textContent ?? '').length
+      if (count + len >= paraStart) {
+        try {
+          const range = document.createRange()
+          range.setStart(node, Math.max(0, Math.min(paraStart - count, len)))
+          range.collapse(true)
+          const rect = range.getBoundingClientRect()
+          return rect.top
+        } catch { return 0 }
+      }
+      count += len
+    } else if ((node as Element).tagName === 'BR') {
+      count += 1
+      if (count > paraStart) {
+        try {
+          const range = document.createRange()
+          range.setStartAfter(node)
+          range.collapse(true)
+          return range.getBoundingClientRect().top
+        } catch { return 0 }
+      }
+    }
+  }
+  return 0
 }
 
 // Percent of text that has changed since last LLM run (0–100), rounded to nearest 5

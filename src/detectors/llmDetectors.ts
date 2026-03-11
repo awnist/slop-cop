@@ -1,4 +1,5 @@
 import type { Violation } from '../types'
+import { RULES } from '../rules'
 
 const SYSTEM_PROMPT = `You are an expert editor analyzing text for LLM-generated prose patterns.
 You will be given a passage and asked to identify specific rhetorical and structural tells.
@@ -12,31 +13,13 @@ Respond ONLY with a valid JSON array. Each element must have:
 If no violations are found, respond with an empty array [].
 Be conservative — only flag clear, unambiguous instances.`
 
-const LLM_RULES_PROMPT = `Identify these patterns:
-
-1. "triple-construction": Exactly 3 parallel grammatical items ("X, Y, and Z") where X/Y/Z are parallel phrases. Do not flag 2-item or 4+ item lists.
-
-2. "throat-clearing": An opening paragraph that adds zero information and could be deleted without any loss of meaning. Flag only if it's the very first paragraph.
-
-3. "sycophantic-frame": Text that opens by complimenting the question, assignment, or topic ("Great question," "This is a fascinating topic," etc.).
-
-4. "balanced-take": A sentence that makes a point then immediately softens it into nothing — reflexive RLHF-style hedging that negates the original claim.
-
-5. "unnecessary-elaboration": A sentence that continues past the point where it was already finished, restating its own point in slightly different words within the same sentence or immediately adjacent clause. Example: "The reform failed. It did not succeed, and the attempt to change things did not work out as intended." — the second sentence adds nothing the first didn't already say. This is strictly a within-sentence or single-sentence pattern. Do NOT flag cross-paragraph patterns (that is one-point-dilution, a separate rule). Do NOT flag an analogy or concept introduced in one paragraph being purposefully extended or applied to a new domain in a subsequent paragraph — that is development, not elaboration.
-
-6. "empathy-performance": Generic emotional language applicable to any situation ("I understand this can be difficult," "Your feelings are valid," etc.).
-
-7. "pivot-paragraph": A one-sentence paragraph containing zero new information — only transitions between surrounding paragraphs.
-
-8. "false-range": A "from X to Y" construction where X and Y are not on any meaningful spectrum or scale — used as a fancy way to list two loosely related things rather than express a genuine range. Also flag hollow idioms like "doesn't come from nowhere" / "doesn't emerge from nowhere" that use "from" as clichéd filler. Flag only clear cases. For matchedText, capture the full verb phrase containing the hollow construction (e.g. "doesn't emerge from nowhere"), not just the prepositional fragment.
-
-9. "grandiose-stakes": Inflating the significance of an ordinary point to world-historical importance ("will fundamentally reshape how we think about everything", "will define the next era of computing", "has implications for the future of humanity") without substantiation.
-
-10. "historical-analogy": Rapid-fire listing of famous companies or tech revolutions stacked together to build false authority by association ("Apple didn't build Uber. Facebook didn't build Spotify..."; "the web, mobile, social, cloud, AI"). Flag when the historical references are decorative rather than analytically necessary.
-
-11. "false-vulnerability": Performative self-awareness or simulated honesty that reads as staged rather than genuine ("And yes, I'll admit...", "I'll be honest with you", "Let's be real:", "And yes, since we're being honest"). Real vulnerability is specific and uncomfortable; flag when it sounds polished and risk-free.
-
-For suggestedChange: rewrite only the matched span. Make it direct and concrete.`
+function buildLLMRulesPrompt(): string {
+  const rules = RULES.filter(r => r.llmTier === 'sentence')
+  const numbered = rules.map((r, i) =>
+    `${i + 1}. "${r.id}": ${r.llmDetectionHint ?? r.description}`
+  ).join('\n\n')
+  return `Identify these patterns:\n\n${numbered}\n\nFor suggestedChange: rewrite only the matched span. Make it direct and concrete.`
+}
 
 // ── Document-level prompt (Sonnet) ───────────────────────────────────────────
 
@@ -51,15 +34,13 @@ Respond ONLY with a valid JSON array. Each element must have:
 If no violations are found, return [].
 Be conservative — only flag clear, unambiguous cases.`
 
-const DOCUMENT_RULES_PROMPT = `Read the entire piece as an editor. Identify these document-level patterns:
-
-1. "dead-metaphor": The same metaphor, image, or conceptual frame recurs 3 or more times across the piece mechanically rather than intentionally. A single metaphor is a choice; the same one appearing every few paragraphs is a crutch. Flag a later instance (not the first), since repetition is the problem.
-
-2. "one-point-dilution": The same core claim or argument appears across multiple paragraphs restated with different words, examples, or metaphors, but adding no new information. The piece pads a simple thesis. Flag the most redundant restatement — a sentence or clause that says something already said.
-
-3. "fractal-summaries": Meta-commentary that previews or recaps content rather than delivering it: "In this section, we will explore...", "As we have seen...", "To summarize what we have covered...", "What follows is an examination of...". Flag only genuine content-free structural signposting, not substantive transitions.
-
-Return only clear cases. If the piece is short, tight, or well-structured, return [].`
+function buildDocumentRulesPrompt(): string {
+  const rules = RULES.filter(r => r.llmTier === 'document')
+  const numbered = rules.map((r, i) =>
+    `${i + 1}. "${r.id}": ${r.llmDetectionHint ?? r.description}`
+  ).join('\n\n')
+  return `Read the entire piece as an editor. Identify these document-level patterns:\n\n${numbered}\n\nReturn only clear cases. If the piece is short, tight, or well-structured, return [].`
+}
 
 // ── Shared types and helpers ──────────────────────────────────────────────────
 
@@ -225,7 +206,7 @@ export async function runLLMDetectors(
       apiKey,
       'claude-haiku-4-5-20251001',
       SYSTEM_PROMPT,
-      `${LLM_RULES_PROMPT}\n\nText to analyze:\n\n${text}`,
+      `${buildLLMRulesPrompt()}\n\nText to analyze:\n\n${text}`,
       30_000,
     )
     return parseViolations(text, raw)
@@ -236,7 +217,7 @@ export async function runLLMDetectors(
         apiKey,
         'claude-haiku-4-5-20251001',
         SYSTEM_PROMPT,
-        `${LLM_RULES_PROMPT}\n\nText to analyze:\n\n${chunk}`,
+        `${buildLLMRulesPrompt()}\n\nText to analyze:\n\n${chunk}`,
         30_000,
       )
         .then(raw => parseViolations(text, raw))
@@ -244,6 +225,61 @@ export async function runLLMDetectors(
     )
   )
   return deduplicateViolations(results.flat())
+}
+
+// ── Paragraph rewrite ─────────────────────────────────────────────────────────
+
+// Rules whose llmDirective is always included in every rewrite prompt
+const REWRITE_DEFAULT_RULE_IDS = [
+  'elevated-register',      // utilize→use, commence→start, etc.
+  'filler-adverbs',         // cut importantly/essentially/fundamentally
+  'hedge-stack',            // remove stacked hedges
+  'unnecessary-elaboration',// stop when the sentence is done
+  'grandiose-stakes',       // scale claims to evidence
+  'triple-construction',    // avoid rule of three
+  'em-dash-pivot',          // replace em-dashes with correct punctuation
+  'balanced-take',          // remove balanced take
+]
+
+// Meta-instructions not captured by any individual rule
+const REWRITE_META_PRINCIPLES = [
+  '- Write directly. Cut preamble and throat-clearing.',
+  "- Don't add explanations or transitions the original didn't have.",
+  '- Preserve the paragraph\'s factual content and core meaning exactly.',
+]
+
+function buildDefaultPrinciples(): string {
+  const ruleDirectives = REWRITE_DEFAULT_RULE_IDS
+    .flatMap(id => {
+      const directive = RULES.find(r => r.id === id)?.llmDirective
+      return directive ? [`- ${directive}`] : []
+    })
+  return [...ruleDirectives, ...REWRITE_META_PRINCIPLES].join('\n')
+}
+
+export function buildRewriteSystemPrompt(violatedRuleHints: string[]): string {
+  const ruleSection = violatedRuleHints.length > 0
+    ? `\n\nThis paragraph has specific problems to fix:\n${violatedRuleHints.map(h => `- ${h}`).join('\n')}`
+    : ''
+  return `You are an expert editor. Rewrite the given paragraph to read like natural, direct human prose. Apply all of these principles:\n${buildDefaultPrinciples()}${ruleSection}\n\nRespond with ONLY the rewritten paragraph text — no labels, no commentary, no quotation marks.`
+}
+
+export async function rewriteParagraph(
+  paragraph: string,
+  violatedRuleHints: string[],
+  apiKey: string,
+): Promise<string> {
+  const raw = await callAnthropic(
+    apiKey,
+    'claude-haiku-4-5-20251001',
+    buildRewriteSystemPrompt(violatedRuleHints),
+    paragraph,
+    20_000,
+  )
+  const result = raw.trim()
+  // If the model returned an editorial instruction instead of replacement prose, treat as delete
+  if (INSTRUCTION_PREFIX.test(result)) return ''
+  return result
 }
 
 // Document-level patterns — deeper, uses Sonnet
@@ -257,7 +293,7 @@ export async function runDocumentDetectors(
     apiKey,
     'claude-sonnet-4-6',
     DOCUMENT_SYSTEM_PROMPT,
-    `${DOCUMENT_RULES_PROMPT}\n\nFull text:\n\n${text}`,
+    `${buildDocumentRulesPrompt()}\n\nFull text:\n\n${text}`,
     60_000,
   )
   return parseViolations(text, raw)
