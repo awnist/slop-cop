@@ -7,7 +7,7 @@ export interface PopoverViolationData {
   endIndex: number
   matchedText: string
   explanation?: string
-  suggestedChange?: string
+  suggestedChange?: string | null
 }
 
 export interface PopoverState {
@@ -160,7 +160,8 @@ export default function Popover({ state, onClose, onApply, onNextRule, onPrevRul
 
         {/* Diff view — shown whenever there's a suggestion OR the word can be removed */}
         {(() => {
-          const effectiveSuggestion = suggestedChange ?? (rule.canRemove ? '' : null)
+          // null = explicitly no action; undefined = not set, fall back to rule's canRemove
+          const effectiveSuggestion = suggestedChange === null ? null : (suggestedChange ?? (rule.canRemove ? '' : null))
           if (effectiveSuggestion === null) return null
           return (
             <div style={{
@@ -180,7 +181,7 @@ export default function Popover({ state, onClose, onApply, onNextRule, onPrevRul
 
         {/* Actions */}
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          {(suggestedChange != null || rule.canRemove) && (
+          {suggestedChange !== null && (suggestedChange !== undefined || rule.canRemove) && (
             <button
               onClick={() => onApply(startIndex, endIndex, suggestedChange ?? '')}
               style={{

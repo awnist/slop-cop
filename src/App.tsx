@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
+import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } from 'react'
 import { RULES, RULES_BY_ID } from './rules'
 import type { Violation } from './types'
 import { runClientDetectors } from './detectors/index'
@@ -142,8 +142,9 @@ export default function App() {
     return () => { if (debounceRef.current) clearTimeout(debounceRef.current) }
   }, [text])
 
-  // Rebuild editor HTML when violations/hidden rules change, but skip while typing
-  useEffect(() => {
+  // Rebuild editor HTML when violations/hidden rules change, but skip while typing.
+  // useLayoutEffect fires before paint so accepted edits show highlights immediately.
+  useLayoutEffect(() => {
     if (isTypingRef.current) return
     const editor = editorRef.current
     if (!editor) return
@@ -266,12 +267,15 @@ export default function App() {
     undoStackRef.current.push(lastPushedRef.current)
     redoStackRef.current = []
     lastPushedRef.current = newText
+    // Run detectors immediately instead of waiting for the debounce — eliminates
+    // the plain-text flash that occurs when editor.innerText is set then highlights
+    // arrive 350ms later. useLayoutEffect will rebuild innerHTML before next paint.
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    setClientViolations(newText.trim() ? runClientDetectors(newText) : [])
     setText(newText)
     setPopover(null)
     setHintVisible(false)
     setLlmStatus(s => (s === 'done' || s === 'error') ? 'stale' : s)
-    const editor = editorRef.current
-    if (editor) editor.innerText = newText
   }, [])
 
 

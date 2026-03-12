@@ -19,11 +19,26 @@ function findAll(text: string, pattern: RegExp, ruleId: string): Violation[] {
 const INTENSIFIERS = [
   'crucial', 'vital', 'robust', 'comprehensive', 'fundamental',
   'arguably', 'straightforward', 'noteworthy', 'realm', 'landscape',
-  'leverage', 'delve', 'tapestry', 'multifaceted', 'nuanced', 'pivotal',
-  'unprecedented', 'navigate', 'foster', 'underscore', 'resonate',
-  'embark', 'streamline', 'spearhead', 'paradigm', 'synergy',
+  'tapestry', 'multifaceted', 'nuanced', 'pivotal',
+  'unprecedented', 'paradigm', 'synergy',
   'holistic', 'transformative', 'cutting-edge', 'innovative', 'dynamic',
-  'harness',
+  // From "words to watch" list
+  'enduring', 'interplay', 'intricate', 'intricacies',
+  'meticulous', 'meticulously', 'valuable', 'vibrant',
+]
+
+// Multi-word phrases that are overused LLM clichés
+const INTENSIFIER_PHRASES = [
+  'align with',
+  'testament to',
+]
+
+// Verb-type intensifiers — moved to NLP detector so deletion is replaced
+// with a correctly-conjugated simpler synonym (deleting a verb breaks the sentence)
+export const VERB_INTENSIFIERS = [
+  'leverage', 'delve', 'navigate', 'foster', 'underscore', 'resonate',
+  'embark', 'streamline', 'spearhead', 'harness',
+  'bolster', 'emphasize', 'enhance', 'garner',
 ]
 
 const ELEVATED_REGISTER: [string, string][] = [
@@ -41,7 +56,6 @@ const ELEVATED_REGISTER: [string, string][] = [
   ['elucidate', 'explain'],
   ['promulgate', 'spread'],
   ['cognizant', 'aware'],
-  ['craft', 'make'],
   ['pertaining to', 'about'],
   ['in regards to', 'about'],
   ['with regards to', 'about'],
@@ -61,7 +75,7 @@ const FILLER_ADVERBS = [
   'importantly', 'essentially', 'fundamentally', 'ultimately',
   'inherently', 'particularly', 'increasingly', 'certainly',
   'undoubtedly', 'obviously', 'clearly', 'simply', 'basically',
-  'quite', 'rather', 'very', 'really', 'truly', 'genuinely',
+  'quite', 'very', 'really', 'truly', 'genuinely',
   'quietly', 'deeply', 'remarkably',
 ]
 
@@ -118,15 +132,28 @@ export function detectOverusedIntensifiers(text: string): Violation[] {
     const re = new RegExp(`\\b${word}s?\\b`, 'gi')
     violations.push(...findAll(text, re, 'overused-intensifiers'))
   }
+  for (const phrase of INTENSIFIER_PHRASES) {
+    const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    violations.push(...findAll(text, new RegExp(`\\b${escaped}\\b`, 'gi'), 'overused-intensifiers'))
+  }
   return violations
 }
 
 export function detectElevatedRegister(text: string): Violation[] {
   const violations: Violation[] = []
-  for (const [elevated] of ELEVATED_REGISTER) {
+  for (const [elevated, replacement] of ELEVATED_REGISTER) {
     const escaped = elevated.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const re = new RegExp(`\\b${escaped}\\b`, 'gi')
-    violations.push(...findAll(text, re, 'elevated-register'))
+    let m: RegExpExecArray | null
+    while ((m = re.exec(text)) !== null) {
+      violations.push({
+        ruleId: 'elevated-register',
+        startIndex: m.index,
+        endIndex: m.index + m[0].length,
+        matchedText: m[0],
+        suggestedChange: replacement || undefined,
+      })
+    }
   }
   return violations
 }
@@ -137,6 +164,8 @@ export function detectFillerAdverbs(text: string): Violation[] {
     const re = new RegExp(`\\b${word}\\b`, 'gi')
     violations.push(...findAll(text, re, 'filler-adverbs'))
   }
+  // "rather" only as vague intensifier ("rather good") — not in "rather than"
+  violations.push(...findAll(text, /\brather(?!\s+than)\b/gi, 'filler-adverbs'))
   return violations
 }
 
@@ -182,12 +211,24 @@ export function detectFalseConclusion(text: string): Violation[] {
 }
 
 export function detectConnectorAddiction(text: string): Violation[] {
-  // Flag connectors at start of paragraphs/sentences
+  // Flag connectors at start of paragraphs/sentences.
+  // Captures the leading boundary and the first char of the next word so we can
+  // suggest: keep boundary + capitalize next word (drop connector + comma entirely).
   const violations: Violation[] = []
   for (const word of CONNECTOR_WORDS) {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const re = new RegExp(`(^|\\n\\s*|[.!?]\\s+)${escaped}[,\\s]`, 'gi')
-    violations.push(...findAll(text, re, 'connector-addiction'))
+    const re = new RegExp(`(^|\\n\\s*|[.!?]\\s+)(${escaped}[,\\s]+)(\\w)`, 'gi')
+    let m: RegExpExecArray | null
+    while ((m = re.exec(text)) !== null) {
+      const [fullMatch, boundary, , nextChar] = m
+      violations.push({
+        ruleId: 'connector-addiction',
+        startIndex: m.index,
+        endIndex: m.index + fullMatch.length,
+        matchedText: fullMatch,
+        suggestedChange: boundary + nextChar.toUpperCase(),
+      })
+    }
   }
   return violations
 }

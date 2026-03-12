@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { runClientDetectors } from '../index'
 import {
   detectOverusedIntensifiers,
   detectElevatedRegister,
@@ -54,10 +55,10 @@ describe('detectOverusedIntensifiers', () => {
     assertFires(detectOverusedIntensifiers('This is crucial to understand.'), 'overused-intensifiers')
   })
   it('flags "leverage"', () => {
-    assertFires(detectOverusedIntensifiers('We must leverage our existing assets.'), 'overused-intensifiers')
+    assertFires(runClientDetectors('We must leverage our existing assets.'), 'overused-intensifiers')
   })
   it('flags "delve"', () => {
-    assertFires(detectOverusedIntensifiers('Let us delve into the details.'), 'overused-intensifiers')
+    assertFires(runClientDetectors('Let us delve into the details.'), 'overused-intensifiers')
   })
   it('flags "robust"', () => {
     assertFires(detectOverusedIntensifiers('We built a robust framework.'), 'overused-intensifiers')
@@ -81,7 +82,7 @@ describe('detectOverusedIntensifiers', () => {
     assertFires(detectOverusedIntensifiers('The competitive landscape has shifted.'), 'overused-intensifiers')
   })
   it('flags "underscore" / "underscores"', () => {
-    assertFires(detectOverusedIntensifiers('This underscores the importance of planning.'), 'overused-intensifiers')
+    assertFires(runClientDetectors('This underscores the importance of planning.'), 'overused-intensifiers')
   })
   it('flags "paradigm"', () => {
     assertFires(detectOverusedIntensifiers('We need a new paradigm for thinking about this.'), 'overused-intensifiers')
@@ -109,8 +110,11 @@ describe('detectElevatedRegister', () => {
   it('flags "demonstrate" (elevated form of "show")', () => {
     assertFires(detectElevatedRegister('The results demonstrate that the approach works.'), 'elevated-register')
   })
-  it('flags "craft" (elevated form of "make")', () => {
-    assertFires(detectElevatedRegister('We should craft a response to each concern.'), 'elevated-register')
+  it('flags "craft" as verb (elevated form of "make")', () => {
+    assertFires(runClientDetectors('We should craft a response to each concern.'), 'elevated-register')
+  })
+  it('does not flag "craft" as noun', () => {
+    assertSilent(runClientDetectors('She bought craft beer and visited a craft store.'), 'elevated-register')
   })
   it('flags "moving forward"', () => {
     assertFires(detectElevatedRegister('Moving forward, we will focus on delivery.'), 'elevated-register')

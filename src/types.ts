@@ -27,7 +27,7 @@ export interface Violation {
   endIndex: number
   matchedText: string
   explanation?: string
-  suggestedChange?: string
+  suggestedChange?: string | null  // null = explicitly no action (don't fall back to canRemove deletion)
 }
 
 export interface AnnotatedSpan {
