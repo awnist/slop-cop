@@ -350,13 +350,20 @@ export default function App() {
     }
   }, [hoveredRuleId])
 
-  // Dim the hint callout when the rewrite button overlaps it vertically
+  // Dim the hint callout when either rewrite button overlaps it vertically
   useEffect(() => {
-    if (!hoveredPara || !hintRef.current) { setHintDimmed(false); return }
+    if (!hintRef.current) { setHintDimmed(false); return }
     const hintRect = hintRef.current.getBoundingClientRect()
-    const overlapsY = hoveredPara.buttonTop < hintRect.bottom + 4 && hoveredPara.buttonTop + 30 > hintRect.top - 4
-    setHintDimmed(overlapsY)
-  }, [hoveredPara])
+    let dimmed = false
+    if (hoveredPara) {
+      dimmed = dimmed || (hoveredPara.buttonTop < hintRect.bottom + 4 && hoveredPara.buttonTop + 30 > hintRect.top - 4)
+    }
+    if (selectionRange) {
+      const btnY = selectionRange.rect.top + selectionRange.rect.height / 2
+      dimmed = dimmed || (btnY < hintRect.bottom + 4 && btnY + 30 > hintRect.top - 4)
+    }
+    setHintDimmed(dimmed)
+  }, [hoveredPara, selectionRange])
 
   // Reset sparkle hover state when the paragraph changes
   useEffect(() => {
