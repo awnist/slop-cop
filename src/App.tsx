@@ -653,11 +653,11 @@ export default function App() {
                   color: '#666',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.07)',
                   whiteSpace: 'nowrap',
-                  minWidth: '77px',
+                  minWidth: '80px',
                 }}
               >
                 <span style={{ fontSize: '12px', lineHeight: 1 }}>✨</span>
-                <span style={{ fontWeight: sparkleHovered ? 600 : 400 }}>Rewrite</span>
+                <span style={{ color: sparkleHovered ? 'black' : '#666' }}>Rewrite</span>
                 {/* Arrow pointing right toward text, matching the hint callout style */}
                 <div style={{ position: 'absolute', right: '-8px', top: '50%', marginTop: '-6px', width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: '8px solid #e0dbd4' }} />
                 <div style={{ position: 'absolute', right: '-7px', top: '50%', marginTop: '-6px', width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: '8px solid #fff' }} />
