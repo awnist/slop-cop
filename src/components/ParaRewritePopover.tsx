@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { diffWords } from 'diff'
 
 interface Props {
   original: string
@@ -15,8 +16,12 @@ export default function ParaRewritePopover({ original, rewritten, error, debugPr
   const [showDebug, setShowDebug] = useState(false)
 
   // Anchor at the sparkle button, shifted right so it doesn't overlap
-  const left = buttonPos.left + 36
-  const top = buttonPos.top - 4
+  // Clamp so the popover never overflows the viewport (16px margin)
+  const POPOVER_W = 440
+  const POPOVER_MAX_H = 520
+  const MARGIN = 16
+  const left = Math.min(buttonPos.left + 36, window.innerWidth - POPOVER_W - MARGIN)
+  const top = Math.min(buttonPos.top - 4, window.innerHeight - POPOVER_MAX_H - MARGIN)
 
   return (
     <div
@@ -138,27 +143,6 @@ export default function ParaRewritePopover({ original, rewritten, error, debugPr
 
             {rewritten !== null && (
               <>
-                {/* Original */}
-                <div style={{ marginBottom: '10px' }}>
-                  <div style={{
-                    fontSize: '10px', fontFamily: 'sans-serif', textTransform: 'uppercase',
-                    letterSpacing: '0.08em', color: '#bbb', marginBottom: '5px',
-                  }}>Original</div>
-                  <div style={{
-                    fontSize: '13px',
-                    fontFamily: "'Georgia', serif",
-                    lineHeight: '1.65',
-                    color: '#999',
-                    textDecoration: 'line-through',
-                    textDecorationColor: '#fca5a5',
-                  }}>
-                    {original}
-                  </div>
-                </div>
-
-                {/* Divider */}
-                <div style={{ height: '1px', background: '#f0f0f0', margin: '10px 0' }} />
-
                 {rewritten === '' ? (
                   /* Delete suggestion */
                   <div style={{
@@ -169,24 +153,48 @@ export default function ParaRewritePopover({ original, rewritten, error, debugPr
                     Delete this paragraph.
                   </div>
                 ) : (
-                  /* Rewritten text */
-                  <div>
-                    <div style={{
-                      fontSize: '10px', fontFamily: 'sans-serif', textTransform: 'uppercase',
-                      letterSpacing: '0.08em', color: '#bbb', marginBottom: '5px',
-                    }}>Rewritten</div>
-                    <div style={{
-                      fontSize: '13px',
-                      fontFamily: "'Georgia', serif",
-                      lineHeight: '1.65',
-                      color: '#166534',
-                      background: '#f0fdf4',
-                      borderRadius: '5px',
-                      padding: '8px 10px',
-                    }}>
-                      {rewritten}
+                  <>
+                    {/* Top panel: inline word diff */}
+                    <div style={{ marginBottom: '10px' }}>
+                      <div style={{
+                        fontSize: '10px', fontFamily: 'sans-serif', textTransform: 'uppercase',
+                        letterSpacing: '0.08em', color: '#bbb', marginBottom: '5px',
+                      }}>Difference</div>
+                      <div style={{ fontSize: '13px', fontFamily: "'Georgia', serif", lineHeight: '1.65' }}>
+                        {diffWords(original, rewritten).map((part, i) =>
+                          part.removed ? (
+                            <span key={i} style={{ color: '#dc2626', textDecoration: 'line-through', textDecorationColor: '#fca5a5' }}>{part.value}</span>
+                          ) : part.added ? (
+                            <span key={i} style={{ color: '#16a34a' }}>{part.value}</span>
+                          ) : (
+                            <span key={i} style={{ color: '#999' }}>{part.value}</span>
+                          )
+                        )}
+                      </div>
                     </div>
-                  </div>
+
+                    {/* Divider */}
+                    <div style={{ height: '1px', background: '#f0f0f0', margin: '10px 0' }} />
+
+                    {/* Bottom panel: clean rewritten text */}
+                    <div>
+                      <div style={{
+                        fontSize: '10px', fontFamily: 'sans-serif', textTransform: 'uppercase',
+                        letterSpacing: '0.08em', color: '#bbb', marginBottom: '5px',
+                      }}>Rewritten</div>
+                      <div style={{
+                        fontSize: '13px',
+                        fontFamily: "'Georgia', serif",
+                        lineHeight: '1.65',
+                        color: '#166534',
+                        background: '#f0fdf4',
+                        borderRadius: '5px',
+                        padding: '8px 10px',
+                      }}>
+                        {rewritten}
+                      </div>
+                    </div>
+                  </>
                 )}
               </>
             )}

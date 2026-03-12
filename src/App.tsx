@@ -903,6 +903,7 @@ function getParagraphTopY(editor: HTMLElement, paraStart: number): number {
 function getParagraphBoundingRect(editor: HTMLElement, paraStart: number, paraEnd: number): DOMRect | null {
   let startNode: Node | null = null, startOff = 0
   let endNode: Node | null = null, endOff = 0
+  let lastTextNode: Node | null = null, lastTextLen = 0
   let count = 0
   const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
   let node: Node | null
@@ -915,10 +916,19 @@ function getParagraphBoundingRect(editor: HTMLElement, paraStart: number, paraEn
       if (startNode && !endNode && count + len >= paraEnd) {
         endNode = node; endOff = Math.min(len, paraEnd - count); break
       }
+      lastTextNode = node; lastTextLen = len
       count += len
     } else if ((node as Element).tagName === 'BR') {
+      // paraEnd may land on a BR (trailing newline) — fall back to end of last text node
+      if (startNode && !endNode && count + 1 >= paraEnd) {
+        endNode = lastTextNode; endOff = lastTextLen; break
+      }
       count += 1
     }
+  }
+  // Last resort: if endNode still null but we have startNode, use last text node seen
+  if (startNode && !endNode && lastTextNode) {
+    endNode = lastTextNode; endOff = lastTextLen
   }
   if (!startNode || !endNode) return null
   try {

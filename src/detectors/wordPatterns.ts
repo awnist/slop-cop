@@ -731,6 +731,12 @@ export function detectDramaticFragment(text: string): Violation[] {
     const trimmed = para.text.trim()
     const wordCount = trimmed.split(/\s+/).filter(Boolean).length
     if (wordCount >= 1 && wordCount <= 4 && !trimmed.endsWith(':')) {
+      // Skip title-like paragraphs: no terminal punctuation and either first in document
+      // or all significant words are capitalised (section headings)
+      const hasTerminalPunct = /[.!?]/.test(trimmed)
+      const isFirstPara = text.slice(0, para.start).trim() === ''
+      const allWordsCapped = trimmed.split(/\s+/).every(w => /^[A-Z0-9\-–—"''""\[]/.test(w))
+      if (!hasTerminalPunct && (isFirstPara || allWordsCapped)) continue
       violations.push({
         ruleId: 'dramatic-fragment',
         startIndex: para.start,
