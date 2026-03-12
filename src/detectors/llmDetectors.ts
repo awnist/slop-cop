@@ -3,14 +3,6 @@ import { RULES } from '../rules'
 
 const SYSTEM_PROMPT = `You are an expert editor analyzing text for LLM-generated prose patterns.
 You will be given a passage and asked to identify specific rhetorical and structural tells.
-
-Respond ONLY with a valid JSON array. Each element must have:
-- ruleId: string (one of the rule IDs listed below)
-- matchedText: string (copy the EXACT substring from the text, character-for-character — this is used to locate the span, so it must match precisely)
-- explanation: string (one sentence explaining why this is a violation)
-- suggestedChange: string — CRITICAL: this field is inserted VERBATIM into the document to replace matchedText. It must be the actual replacement text, not instructions. If the fix is to delete the matched text entirely, use an empty string "". Never write "Remove this...", "Delete...", "Replace with...", or any other editorial instruction — only the literal new text (or "" for deletion).
-
-If no violations are found, respond with an empty array [].
 Be conservative — only flag clear, unambiguous instances.`
 
 function buildLLMRulesPrompt(): string {
@@ -24,14 +16,6 @@ function buildLLMRulesPrompt(): string {
 // ── Document-level prompt (Sonnet) ───────────────────────────────────────────
 
 const DOCUMENT_SYSTEM_PROMPT = `You are an experienced editor reading a complete piece of writing to identify structural and compositional problems that only become visible at document scale — patterns that emerge across paragraphs rather than within a single sentence.
-
-Respond ONLY with a valid JSON array. Each element must have:
-- ruleId: string (one of the rule IDs listed below)
-- matchedText: string (copy the EXACT substring from the text, character-for-character — used to locate the span, so it must match precisely)
-- explanation: string (one sentence explaining the problem)
-- suggestedChange: string — CRITICAL: this field is inserted VERBATIM into the document to replace matchedText. It must be the actual replacement text, not instructions. If the fix is to delete the matched text entirely, use an empty string "". Never write "Remove this...", "Delete...", "Replace with...", or any editorial instruction — only the literal new text (or "" for deletion).
-
-If no violations are found, return [].
 Be conservative — only flag clear, unambiguous cases.`
 
 function buildDocumentRulesPrompt(): string {
@@ -51,7 +35,7 @@ interface LLMResult {
   suggestedChange: string
 }
 
-// Detect when the model wrote instructions instead of replacement text
+// Detect when the model wrote instructions instead of replacement text (used for inline suggestions)
 const INSTRUCTION_PREFIX = /^(remove|delete|cut|eliminate|omit|replace|rewrite|revise|change|consider|rephrase)\b/i
 
 function sanitizeSuggestedChange(suggestion: string, matchedText: string): string {
@@ -67,14 +51,9 @@ function sanitizeSuggestedChange(suggestion: string, matchedText: string): strin
   return suggestion
 }
 
-function parseViolations(text: string, rawText: string): Violation[] {
-  const jsonMatch = rawText.match(/\[[\s\S]*\]/)
-  if (!jsonMatch) return []
-  let parsed: LLMResult[]
-  try { parsed = JSON.parse(jsonMatch[0]) as LLMResult[] } catch { return [] }
-
+function processViolations(text: string, items: LLMResult[]): Violation[] {
   const violations: Violation[] = []
-  for (const item of parsed) {
+  for (const item of items) {
     if (typeof item.ruleId !== 'string' || typeof item.matchedText !== 'string') continue
     if (!item.matchedText) continue
     const suggestion = sanitizeSuggestedChange(item.suggestedChange ?? '', item.matchedText)
@@ -105,59 +84,51 @@ function parseViolations(text: string, rawText: string): Violation[] {
   return violations
 }
 
-async function callAnthropic(
+
+// ── Shared violation tool schema ─────────────────────────────────────────────
+
+const VIOLATION_TOOL_NAME = 'submit_violations'
+const VIOLATION_TOOL_DESCRIPTION = 'Submit all detected violations. Use an empty array if none found.'
+const VIOLATION_TOOL_SCHEMA = {
+  type: 'object',
+  properties: {
+    violations: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          ruleId:        { type: 'string', description: 'The rule ID being violated.' },
+          matchedText:   { type: 'string', description: 'The EXACT substring from the text, character-for-character.' },
+          explanation:   { type: 'string', description: 'One sentence explaining why this is a violation.' },
+          suggestedChange: { type: 'string', description: 'Literal replacement text inserted verbatim, or "" to delete. Never write instructions.' },
+        },
+        required: ['ruleId', 'matchedText', 'explanation', 'suggestedChange'],
+      },
+    },
+  },
+  required: ['violations'],
+}
+
+async function callViolationDetector(
   apiKey: string,
   model: string,
   systemPrompt: string,
   userContent: string,
+  fullText: string,
   timeoutMs: number,
-): Promise<string> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
-  let response: Response
-  try {
-    response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      signal: controller.signal,
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-        'anthropic-dangerous-direct-browser-access': 'true',
-      },
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userContent }],
-      }),
-    })
-  } catch (err) {
-    if (err instanceof DOMException && err.name === 'AbortError') {
-      throw new Error(`Request timed out after ${timeoutMs / 1000}s.`)
-    }
-    throw new Error(
-      'Network error — could not reach api.anthropic.com. ' +
-      'Try opening the browser console Network tab to see the blocked preflight request.'
-    )
-  } finally {
-    clearTimeout(timer)
-  }
-  if (!response.ok) {
-    let detail = ''
-    try { detail = await response.text() } catch { /* ignore */ }
-    if (response.status === 401) throw new Error(`Invalid API key (401): ${detail}`)
-    if (response.status === 429) throw new Error('Rate limited (429). Wait a moment and try again.')
-    throw new Error(`Anthropic API ${response.status}: ${detail.slice(0, 200)}`)
-  }
-  const data = await response.json() as { content: Array<{ type: string; text: string }> }
-  return data.content.find(b => b.type === 'text')?.text ?? '[]'
+): Promise<Violation[]> {
+  const result = await callAnthropicTool<{ violations: LLMResult[] }>(
+    apiKey, model, systemPrompt, userContent,
+    VIOLATION_TOOL_NAME, VIOLATION_TOOL_DESCRIPTION, VIOLATION_TOOL_SCHEMA,
+    timeoutMs,
+  )
+  return processViolations(fullText, result.violations ?? [])
 }
 
 // ── Chunking for large documents ─────────────────────────────────────────────
 // Haiku misses patterns when given very long texts. Above CHUNK_THRESHOLD we
 // split on paragraph boundaries, run chunks in parallel, then merge results.
-// parseViolations always receives the full text so indexOf finds correct offsets.
+// processViolations always receives the full text so indexOf finds correct offsets.
 
 const CHUNK_THRESHOLD = 4000 // chars; below this, single call
 const CHUNK_SIZE = 3500      // target chars per chunk
@@ -202,26 +173,19 @@ export async function runLLMDetectors(
   onProgress?.('Analyzing with Claude Haiku (sentence patterns)...')
   const chunks = chunkText(text)
   if (chunks.length === 1) {
-    const raw = await callAnthropic(
-      apiKey,
-      'claude-haiku-4-5-20251001',
-      SYSTEM_PROMPT,
+    return callViolationDetector(
+      apiKey, 'claude-haiku-4-5-20251001', SYSTEM_PROMPT,
       `${buildLLMRulesPrompt()}\n\nText to analyze:\n\n${text}`,
-      30_000,
+      text, 30_000,
     )
-    return parseViolations(text, raw)
   }
   const results = await Promise.all(
     chunks.map(chunk =>
-      callAnthropic(
-        apiKey,
-        'claude-haiku-4-5-20251001',
-        SYSTEM_PROMPT,
+      callViolationDetector(
+        apiKey, 'claude-haiku-4-5-20251001', SYSTEM_PROMPT,
         `${buildLLMRulesPrompt()}\n\nText to analyze:\n\n${chunk}`,
-        30_000,
-      )
-        .then(raw => parseViolations(text, raw))
-        .catch(() => [] as Violation[])
+        text, 30_000,
+      ).catch(() => [] as Violation[])
     )
   )
   return deduplicateViolations(results.flat())
@@ -259,9 +223,60 @@ function buildDefaultPrinciples(): string {
 
 export function buildRewriteSystemPrompt(violatedRuleHints: string[]): string {
   const ruleSection = violatedRuleHints.length > 0
-    ? `\n\nThis paragraph has specific problems to fix:\n${violatedRuleHints.map(h => `- ${h}`).join('\n')}`
+    ? `\n\nThis text has specific problems to fix:\n${violatedRuleHints.map(h => `- ${h}`).join('\n')}`
     : ''
-  return `You are an expert editor. Rewrite the given paragraph to read like natural, direct human prose. Apply all of these principles:\n${buildDefaultPrinciples()}${ruleSection}\n\nRespond with ONLY the rewritten paragraph text — no labels, no commentary, no quotation marks.`
+  return `You are an expert editor. Rewrite the given text to read like natural, direct human prose. Apply all of these principles:\n${buildDefaultPrinciples()}${ruleSection}`
+}
+
+async function callAnthropicTool<T>(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userContent: string,
+  toolName: string,
+  toolDescription: string,
+  inputSchema: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let response: Response
+  try {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 4096,
+        system: systemPrompt,
+        tools: [{ name: toolName, description: toolDescription, input_schema: inputSchema }],
+        tool_choice: { type: 'tool', name: toolName },
+        messages: [{ role: 'user', content: userContent }],
+      }),
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw new Error(`Request timed out after ${timeoutMs / 1000}s.`)
+    throw new Error('Network error — could not reach api.anthropic.com.')
+  } finally {
+    clearTimeout(timer)
+  }
+  if (!response.ok) {
+    let detail = ''
+    try { detail = await response.text() } catch { /* ignore */ }
+    if (response.status === 401) throw new Error(`Invalid API key (401): ${detail}`)
+    if (response.status === 429) throw new Error('Rate limited (429). Wait a moment and try again.')
+    throw new Error(`Anthropic API ${response.status}: ${detail.slice(0, 200)}`)
+  }
+  const data = await response.json() as { content: Array<{ type: string; name?: string; input?: unknown }> }
+  const toolBlock = data.content.find(b => b.type === 'tool_use' && b.name === toolName)
+  if (!toolBlock?.input) throw new Error('No tool response from model.')
+  return toolBlock.input as T
 }
 
 export async function rewriteParagraph(
@@ -269,17 +284,23 @@ export async function rewriteParagraph(
   violatedRuleHints: string[],
   apiKey: string,
 ): Promise<string> {
-  const raw = await callAnthropic(
+  const result = await callAnthropicTool<{ rewritten: string }>(
     apiKey,
     'claude-haiku-4-5-20251001',
     buildRewriteSystemPrompt(violatedRuleHints),
     paragraph,
+    'submit_rewrite',
+    'Submit the rewritten text. Use an empty string to suggest deletion.',
+    {
+      type: 'object',
+      properties: {
+        rewritten: { type: 'string', description: 'The rewritten text, preserving all factual content. Empty string to suggest deletion.' },
+      },
+      required: ['rewritten'],
+    },
     20_000,
   )
-  const result = raw.trim()
-  // If the model returned an editorial instruction instead of replacement prose, treat as delete
-  if (INSTRUCTION_PREFIX.test(result)) return ''
-  return result
+  return result.rewritten.trim()
 }
 
 // Document-level patterns — deeper, uses Sonnet
@@ -289,12 +310,9 @@ export async function runDocumentDetectors(
   onProgress?: (msg: string) => void,
 ): Promise<Violation[]> {
   onProgress?.('Analyzing with Claude Sonnet (document structure)...')
-  const raw = await callAnthropic(
-    apiKey,
-    'claude-sonnet-4-6',
-    DOCUMENT_SYSTEM_PROMPT,
+  return callViolationDetector(
+    apiKey, 'claude-sonnet-4-6', DOCUMENT_SYSTEM_PROMPT,
     `${buildDocumentRulesPrompt()}\n\nFull text:\n\n${text}`,
-    60_000,
+    text, 60_000,
   )
-  return parseViolations(text, raw)
 }

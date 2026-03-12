@@ -72,6 +72,9 @@ export default function App() {
   const [hintDimmed, setHintDimmed] = useState(false)
   const [sparkleHovered, setSparkleHovered] = useState(false)
   const [paraHighlightRect, setParaHighlightRect] = useState<DOMRect | null>(null)
+  const [selectionRange, setSelectionRange] = useState<{ start: number; end: number; text: string; rect: DOMRect; buttonLeft: number } | null>(null)
+  const [selectionBtnHovered, setSelectionBtnHovered] = useState(false)
+  const rewritePopoverRef = useRef(rewritePopover)
   const mouseMoveThrottleRef = useRef<number>(0)
 
   // Re-resolve LLM violation positions from matchedText on every text change.
@@ -433,6 +436,77 @@ export default function App() {
     setHoveredPara(null)
   }, [])
 
+  // Keep ref in sync so the selectionchange handler can check it without stale closure
+  useEffect(() => { rewritePopoverRef.current = rewritePopover }, [rewritePopover])
+
+  // Clear selection button when the selection collapses, but not while rewrite popover is open
+  useEffect(() => {
+    const handle = () => {
+      if (rewritePopoverRef.current) return
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed) setSelectionRange(null)
+    }
+    document.addEventListener('selectionchange', handle)
+    return () => document.removeEventListener('selectionchange', handle)
+  }, [])
+
+  const handleEditorMouseUp = useCallback(() => {
+    const editor = editorRef.current
+    if (!editor || rewritePopover) return
+    const sel = window.getSelection()
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) { setSelectionRange(null); return }
+    const range = sel.getRangeAt(0)
+    if (!editor.contains(range.commonAncestorContainer)) { setSelectionRange(null); return }
+    const start = getCharOffsetFromPoint(editor, range.startContainer, range.startOffset)
+    const end = getCharOffsetFromPoint(editor, range.endContainer, range.endOffset)
+    if (end <= start) { setSelectionRange(null); return }
+    const selectedText = textRef.current.slice(start, end)
+    if (selectedText.trim().length < 80) { setSelectionRange(null); return }
+    const editorRect = editor.getBoundingClientRect()
+    const buttonLeft = editorRect.left + 44
+    setSelectionRange({ start, end, text: selectedText, rect: range.getBoundingClientRect(), buttonLeft })
+  }, [rewritePopover])
+
+  const handleSelectionRewrite = useCallback(async () => {
+    if (!selectionRange) return
+    const { text: paraText, start: paraStart, end: paraEnd, rect, buttonLeft: btnLeft } = selectionRange
+    const buttonLeft = btnLeft
+    const buttonTop = rect.top + rect.height / 2
+
+    if (!apiKey) {
+      setRewritePopover({ paraText, paraStart, paraEnd, buttonLeft, buttonTop, rewritten: null, error: null, loading: false, debugPrompt: '', noApiKey: true })
+      return
+    }
+
+    const paraViolations = violationsRef.current.filter(
+      v => v.startIndex >= paraStart && v.endIndex <= paraEnd + 2
+    )
+    const byRule = new Map<string, string[]>()
+    for (const v of paraViolations) {
+      if (!byRule.has(v.ruleId)) byRule.set(v.ruleId, [])
+      byRule.get(v.ruleId)!.push(v.matchedText.trim())
+    }
+    const ruleHints: string[] = []
+    for (const [ruleId, matches] of byRule) {
+      const hint = RULES_BY_ID[ruleId]?.rewriteHint
+      if (!hint) continue
+      const directive = RULES_BY_ID[ruleId]?.llmDirective ?? hint
+      const cited = matches.slice(0, 4).map(m => `"${m.length > 70 ? m.slice(0, 70) + '…' : m}"`).join(', ')
+      ruleHints.push(`${directive} — flagged in this selection: ${cited}`)
+    }
+
+    const debugPrompt = buildRewriteSystemPrompt(ruleHints)
+    setRewritePopover({ paraText, paraStart, paraEnd, buttonLeft, buttonTop, rewritten: null, error: null, loading: true, debugPrompt })
+
+    try {
+      const result = await rewriteParagraph(paraText, ruleHints, apiKey)
+      setRewritePopover(prev => prev ? { ...prev, rewritten: result, loading: false } : null)
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      setRewritePopover(prev => prev ? { ...prev, error: msg, loading: false } : null)
+    }
+  }, [selectionRange, apiKey])
+
   const handleSparkleClick = useCallback(async () => {
     if (!hoveredPara) return
     const { text: paraText, start: paraStart, end: paraEnd, buttonLeft, buttonTop } = hoveredPara
@@ -517,6 +591,7 @@ export default function App() {
           style={{ flex: 1, overflowY: 'auto', padding: '48px 64px 80px', position: 'relative' }}
           onMouseMove={handleEditorMouseMove}
           onMouseLeave={handleEditorMouseLeave}
+          onMouseUp={handleEditorMouseUp}
         >
           <div ref={editorWrapperRef} style={{ maxWidth: '680px', margin: '0 auto', position: 'relative' }}>
             {/* Callout box — sits in left margin, arrow points right at the text */}
@@ -617,7 +692,47 @@ export default function App() {
           </div>
 
           {/* Sparkle button — child of scroll container so moving to it doesn't fire onMouseLeave */}
-          {hoveredPara && !rewritePopover && (
+          {selectionRange && !rewritePopover && (
+            <div
+              style={{
+                position: 'fixed',
+                left: selectionRange.buttonLeft,
+                top: selectionRange.rect.top + selectionRange.rect.height / 2,
+                transform: 'translate(-100%, -50%)',
+                zIndex: 50,
+              }}
+            >
+              <button
+                onMouseDown={e => { e.preventDefault(); handleSelectionRewrite() }}
+                onMouseEnter={() => setSelectionBtnHovered(true)}
+                onMouseLeave={() => setSelectionBtnHovered(false)}
+                style={{
+                  position: 'relative',
+                  background: '#fff',
+                  border: '1px solid #e0dbd4',
+                  borderRadius: '8px',
+                  padding: '4px 10px 4px 9px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  fontSize: '11px',
+                  fontFamily: 'sans-serif',
+                  color: '#666',
+                  boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+                  whiteSpace: 'nowrap',
+                  minWidth: '120px',
+                }}
+              >
+                <span style={{ fontSize: '12px', lineHeight: 1 }}>✨</span>
+                <span style={{ color: selectionBtnHovered ? '#000' : '#666' }}>Rewrite selection</span>
+                <div style={{ position: 'absolute', right: '-8px', top: '50%', marginTop: '-6px', width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: '8px solid #e0dbd4' }} />
+                <div style={{ position: 'absolute', right: '-7px', top: '50%', marginTop: '-6px', width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: '8px solid #fff' }} />
+              </button>
+            </div>
+          )}
+
+          {hoveredPara && !rewritePopover && !selectionRange && (
             <div
               ref={sparkleButtonRef}
               style={{

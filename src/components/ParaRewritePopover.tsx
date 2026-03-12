@@ -74,7 +74,7 @@ export default function ParaRewritePopover({ original, rewritten, error, debugPr
         {noApiKey ? (
           <div style={{ fontFamily: 'sans-serif' }}>
             <p style={{ fontSize: '13px', color: '#444', margin: '0 0 12px', lineHeight: '1.5' }}>
-              Enter an Anthropic API key in the toolbar to enable AI features:
+              <mark style={{ background: '#fef08a', borderRadius: '2px', padding: '0 2px' }}>Enter an Anthropic API key in the toolbar</mark> to enable AI features:
             </p>
             <ul style={{ margin: '0 0 12px', padding: '0 0 0 16px', fontSize: '12px', color: '#555', lineHeight: '1.8' }}>
               <li><strong>Paragraph rewrite</strong> — rewrites a paragraph to remove detected patterns</li>
@@ -160,7 +160,7 @@ export default function ParaRewritePopover({ original, rewritten, error, debugPr
                         fontSize: '10px', fontFamily: 'sans-serif', textTransform: 'uppercase',
                         letterSpacing: '0.08em', color: '#bbb', marginBottom: '5px',
                       }}>Difference</div>
-                      <div style={{ fontSize: '13px', fontFamily: "'Georgia', serif", lineHeight: '1.65' }}>
+                      <div style={{ fontSize: '13px', fontFamily: "'Georgia', serif", lineHeight: '1.65', whiteSpace: 'pre-wrap' }}>
                         {diffWords(original, rewritten).map((part, i) =>
                           part.removed ? (
                             <span key={i} style={{ color: '#dc2626', textDecoration: 'line-through', textDecorationColor: '#fca5a5' }}>{part.value}</span>
@@ -190,6 +190,7 @@ export default function ParaRewritePopover({ original, rewritten, error, debugPr
                         background: '#f0fdf4',
                         borderRadius: '5px',
                         padding: '8px 10px',
+                        whiteSpace: 'pre-wrap',
                       }}>
                         {rewritten}
                       </div>
