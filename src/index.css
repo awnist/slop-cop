@@ -69,3 +69,8 @@ mark {
     padding-left: 8px !important;
   }
 }
+
+.mark-dimmed {
+  background: transparent !important;
+  border-bottom: none !important;
+}

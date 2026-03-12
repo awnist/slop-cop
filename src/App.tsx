@@ -70,6 +70,8 @@ export default function App() {
   const sparkleButtonRef = useRef<HTMLDivElement>(null)
   const hintRef = useRef<HTMLDivElement>(null)
   const [hintDimmed, setHintDimmed] = useState(false)
+  const [sparkleHovered, setSparkleHovered] = useState(false)
+  const [paraHighlightRect, setParaHighlightRect] = useState<DOMRect | null>(null)
   const mouseMoveThrottleRef = useRef<number>(0)
 
   // Re-resolve LLM violation positions from matchedText on every text change.
@@ -353,6 +355,28 @@ export default function App() {
     setHintDimmed(overlapsY)
   }, [hoveredPara])
 
+  // Reset sparkle hover state when the paragraph changes
+  useEffect(() => {
+    setSparkleHovered(false)
+    setParaHighlightRect(null)
+  }, [hoveredPara?.idx])
+
+  // Dim marks within the hovered paragraph when sparkle button is hovered
+  useEffect(() => {
+    if (!sparkleHovered || !hoveredPara || !editorRef.current) return
+    const marks = editorRef.current.querySelectorAll<HTMLElement>('mark')
+    const affected: HTMLElement[] = []
+    marks.forEach(mark => {
+      const s = parseInt(mark.getAttribute('data-start') ?? '-1')
+      const e = parseInt(mark.getAttribute('data-end') ?? '-1')
+      if (s >= hoveredPara.start && e <= hoveredPara.end) {
+        mark.classList.add('mark-dimmed')
+        affected.push(mark)
+      }
+    })
+    return () => { affected.forEach(m => m.classList.remove('mark-dimmed')) }
+  }, [sparkleHovered, hoveredPara])
+
   const handleClear = useCallback(() => {
     const editor = editorRef.current
     undoStackRef.current.push(lastPushedRef.current)
@@ -569,7 +593,7 @@ export default function App() {
             <div
               ref={editorRef}
               className="editor-content"
-              contentEditable
+              contentEditable="plaintext-only"
               suppressContentEditableWarning
               onInput={handleInput}
               onKeyDown={handleKeyDown}
@@ -606,6 +630,13 @@ export default function App() {
             >
               <button
                 onMouseDown={handleSparkleClick}
+                onMouseEnter={() => {
+                  setSparkleHovered(true)
+                  if (editorRef.current && hoveredPara) {
+                    setParaHighlightRect(getParagraphBoundingRect(editorRef.current, hoveredPara.start, hoveredPara.end))
+                  }
+                }}
+                onMouseLeave={() => { setSparkleHovered(false); setParaHighlightRect(null) }}
                 title="Rewrite this paragraph with AI"
                 style={{
                   position: 'relative',
@@ -622,15 +653,31 @@ export default function App() {
                   color: '#666',
                   boxShadow: '0 2px 8px rgba(0,0,0,0.07)',
                   whiteSpace: 'nowrap',
+                  minWidth: '77px',
                 }}
               >
                 <span style={{ fontSize: '12px', lineHeight: 1 }}>✨</span>
-                <span>Rewrite</span>
+                <span style={{ fontWeight: sparkleHovered ? 600 : 400 }}>Rewrite</span>
                 {/* Arrow pointing right toward text, matching the hint callout style */}
                 <div style={{ position: 'absolute', right: '-8px', top: '50%', marginTop: '-6px', width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: '8px solid #e0dbd4' }} />
                 <div style={{ position: 'absolute', right: '-7px', top: '50%', marginTop: '-6px', width: 0, height: 0, borderTop: '6px solid transparent', borderBottom: '6px solid transparent', borderLeft: '8px solid #fff' }} />
               </button>
             </div>
+          )}
+          {/* Yellow paragraph highlight on sparkle hover */}
+          {paraHighlightRect && (
+            <div style={{
+              position: 'fixed',
+              left: paraHighlightRect.left - 4,
+              top: paraHighlightRect.top - 2,
+              width: paraHighlightRect.width + 8,
+              height: paraHighlightRect.height + 4,
+              background: 'rgba(254, 240, 138, 0.35)',
+              mixBlendMode: 'multiply',
+              borderRadius: '3px',
+              pointerEvents: 'none',
+              zIndex: 10,
+            }} />
           )}
         </div>
 
@@ -851,6 +898,35 @@ function getParagraphTopY(editor: HTMLElement, paraStart: number): number {
     }
   }
   return 0
+}
+
+function getParagraphBoundingRect(editor: HTMLElement, paraStart: number, paraEnd: number): DOMRect | null {
+  let startNode: Node | null = null, startOff = 0
+  let endNode: Node | null = null, endOff = 0
+  let count = 0
+  const walker = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT | NodeFilter.SHOW_ELEMENT)
+  let node: Node | null
+  while ((node = walker.nextNode())) {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const len = (node.textContent ?? '').length
+      if (!startNode && count + len >= paraStart) {
+        startNode = node; startOff = Math.max(0, paraStart - count)
+      }
+      if (startNode && !endNode && count + len >= paraEnd) {
+        endNode = node; endOff = Math.min(len, paraEnd - count); break
+      }
+      count += len
+    } else if ((node as Element).tagName === 'BR') {
+      count += 1
+    }
+  }
+  if (!startNode || !endNode) return null
+  try {
+    const range = document.createRange()
+    range.setStart(startNode, startOff)
+    range.setEnd(endNode, endOff)
+    return range.getBoundingClientRect()
+  } catch { return null }
 }
 
 // Percent of text that has changed since last LLM run (0–100), rounded to nearest 5
