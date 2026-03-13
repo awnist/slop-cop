@@ -8,9 +8,7 @@
  * may run on 5–10 sentences instead of thousands of words.
  */
 
-// eslint-disable-next-line @typescript-eslint/ban-ts-comment
-// @ts-ignore — compromise ships its own types but the import path varies by bundler
-import nlp from 'compromise'
+import nlp from './nlpInstance'
 import type { Violation } from '../types'
 import { VERB_INTENSIFIERS } from './wordPatterns'
 
@@ -53,13 +51,26 @@ const VERB_REPLACEMENTS: Record<string, string | undefined> = {
   resonate:   undefined,  // too context-dependent
 }
 
+// Strip trailing 'e' from a verb stem so the prefix matches all conjugated forms.
+// Verbs ending in 'e' drop the 'e' before '-ing' (leverage→leveraging, not leverageing),
+// so the stem prefix must be truncated to match all forms:
+//   leverage  → leverag  matches leverage, leverages, leveraged, leveraging  ✓
+//   showcase  → showcas  matches showcase, showcases, showcased, showcasing  ✓
+//   streamline → streamlin matches all forms ✓
+// Stems NOT ending in 'e' work as-is (foster → foster matches fostering etc.).
+function toStemPrefix(s: string): string {
+  return s.endsWith('e') ? s.slice(0, -1) : s
+}
+
 // All stems that can trigger an NLP violation. Any sentence containing one of
 // these words is a candidate; sentences without them are skipped entirely.
+// Verb stems are mapped through toStemPrefix so that gerunds and -s forms
+// (e.g. "leveraging", "showcasing") are caught by the pre-filter.
 const TRIGGER_STEMS = [
   'key',
-  'highlight', 'showcase', 'boast', 'craft',
-  ...VERB_INTENSIFIERS,
-  // "in a [adj] way/manner/sense" phrase detector
+  ...['highlight', 'showcase', 'boast', 'craft'].map(toStemPrefix),
+  ...VERB_INTENSIFIERS.map(toStemPrefix),
+  // "in a [adj] way/manner/sense" phrase detector (exact words, no conjugation)
   'way', 'manner', 'sense', 'fashion', 'regard',
 ]
 
@@ -115,45 +126,54 @@ function firstTermViolations(doc: NlpDoc, pattern: string, ruleId: string): Viol
 
 /**
  * Convert an adjective to its adverb form for phrase-collapse suggestions.
- * e.g. "crucial" → "crucially", "holistic" → "holistically", "notable" → "notably"
+ * Uses compromise's built-in adjective→adverb derivation (handles irregular forms,
+ * suffix rules, lexicon lookups). Falls back to simple suffix rules if compromise
+ * doesn't recognise the word as an adjective in isolation.
  */
 function toAdverb(adj: string): string {
+  const result = nlp(adj).adjectives().toAdverb().text()
+  if (result) return result
+  // Fallback suffix rules for words compromise doesn't tag as adjectives in isolation
   const lower = adj.toLowerCase()
-  if (lower.endsWith('ic')) return adj + 'ally'             // holistic → holistically
-  if (lower.endsWith('le')) return adj.slice(0, -1) + 'y'  // notable → notably
-  if (lower.endsWith('y') && lower.length > 2) return adj.slice(0, -1) + 'ily'  // noteworthy → noteworthily
-  return adj + 'ly'                                         // crucial → crucially
+  if (lower.endsWith('ic')) return adj + 'ally'
+  if (lower.endsWith('le')) return adj.slice(0, -1) + 'y'
+  if (lower.endsWith('y') && lower.length > 2) return adj.slice(0, -1) + 'ily'
+  return adj + 'ly'
 }
 
 /**
- * Find the slop verb term within each verb chunk (which may be "is showcasing",
- * "has boasted", etc.), extract its tense, and suggest a simpler conjugated synonym.
+ * Find slop verbs among all #Verb-tagged terms and suggest simpler conjugated synonyms.
+ *
+ * Uses `doc.match('#Verb')` rather than `doc.verbs()` to avoid depending on the
+ * three-tier chunker plugin. The chunker redefines how verb phrases are grouped
+ * (changing `.verbs()` to use chunk-based matching via `<Verb>`), which requires
+ * ALL three-tier plugins to be loaded for correct context-dependent tagging of
+ * ambiguous nouns/verbs like "leverage" or "harness". The two-tier POS tagger
+ * already tags each term with tense (Gerund, PastTense, Infinitive, PresentTense),
+ * so we get the tense info we need without the chunk-level machinery.
  */
 function verbViolations(doc: NlpDoc, stem: RegExp, ruleId: string): Violation[] {
   const violations: Violation[] = []
-  doc.verbs().forEach((v: NlpDoc) => {
-    const chunkMatches = v.json({ offset: true, tags: true }) as MatchJson[]
-    if (!chunkMatches.length) return
-    // Search terms within the chunk for the flagged verb (may be preceded by auxiliary)
-    for (const term of chunkMatches[0].terms ?? []) {
-      if (!stem.test(term.text)) continue
-      if (!term.offset) continue
-      const { start, length } = term.offset
-      // Find the base replacement and conjugate to match the detected tense
-      const base = Object.keys(VERB_REPLACEMENTS).find(k => term.text.toLowerCase().startsWith(k))
-      const baseReplacement = base ? VERB_REPLACEMENTS[base] : undefined
-      // null = explicitly no action (verb with no clean synonym — deletion would break the sentence)
-      const suggestedChange = baseReplacement ? conjugate(baseReplacement, term.tags) : null
-      violations.push({
-        ruleId,
-        startIndex: start,
-        endIndex: start + length,
-        matchedText: term.text,
-        suggestedChange,
-      })
-      break
-    }
-  })
+  const json = doc.match('#Verb').json({ offset: true, tags: true }) as MatchJson[]
+  for (const phrase of json) {
+    // Each phrase is a single term when matching #Verb (not a chunk)
+    const term = phrase.terms?.[0]
+    if (!term?.offset) continue
+    if (!stem.test(term.text)) continue
+    const { start, length } = term.offset
+    // Find the base replacement and conjugate to match the detected tense
+    const base = Object.keys(VERB_REPLACEMENTS).find(k => term.text.toLowerCase().startsWith(toStemPrefix(k)))
+    const baseReplacement = base ? VERB_REPLACEMENTS[base] : undefined
+    // null = explicitly no action (verb with no clean synonym — deletion would break the sentence)
+    const suggestedChange = baseReplacement ? conjugate(baseReplacement, term.tags) : null
+    violations.push({
+      ruleId,
+      startIndex: start,
+      endIndex: start + length,
+      matchedText: term.text,
+      suggestedChange,
+    })
+  }
   return violations
 }
 
@@ -162,7 +182,7 @@ function verbViolations(doc: NlpDoc, stem: RegExp, ruleId: string): Violation[] 
  * Flags the WHOLE phrase and suggests collapsing to an adverb
  * (e.g. "in a crucial way" → "crucially").
  */
-function inAWayViolations(doc: NlpDoc, chunkText: string, ruleId: string): Violation[] {
+function inAWayViolations(doc: NlpDoc, _chunkText: string, ruleId: string): Violation[] {
   const violations: Violation[] = []
   doc.match('in (a|an) #Adjective (way|manner|sense|fashion|regard)').forEach((m: NlpDoc) => {
     const matches = m.json({ offset: true, tags: true }) as MatchJson[]
@@ -172,14 +192,17 @@ function inAWayViolations(doc: NlpDoc, chunkText: string, ruleId: string): Viola
     const { start, length } = phrase.offset
     const adjTerm = (phrase.terms ?? []).find((t: TermJson) => t.tags.includes('Adjective'))
     if (!adjTerm) return
-    // Carry trailing punctuation into the replacement so it isn't lost
-    const charAfter = chunkText[start + length] ?? ''
-    const punct = /[.!?,;:]/.test(charAfter) ? charAfter : ''
+    // compromise's phrase offset already includes trailing punctuation in `length`
+    // (e.g. "in a crucial way." has length=17, spanning the period).
+    // Check phrase.text's last character — NOT chunkText[start+length] which is
+    // always the character AFTER the match (undefined at sentence end).
+    const lastChar = phrase.text.slice(-1)
+    const punct = /[.!?,;:]/.test(lastChar) ? lastChar : ''
     violations.push({
       ruleId,
       startIndex: start,
-      endIndex: start + length + punct.length,
-      matchedText: phrase.text + punct,
+      endIndex: start + length,  // already includes punct
+      matchedText: phrase.text,  // already includes punct
       suggestedChange: toAdverb(adjTerm.text) + punct,
     })
   })
@@ -187,10 +210,68 @@ function inAWayViolations(doc: NlpDoc, chunkText: string, ruleId: string): Viola
 }
 
 // All verb stems flagged as overused-intensifiers, combined for a single regex pass
+const OVERUSED_VERB_STEMS = ['highlight', 'showcase', 'boast', ...VERB_INTENSIFIERS]
 const OVERUSED_VERB_RE = new RegExp(
-  `^(highlight|showcase|boast|${VERB_INTENSIFIERS.join('|')})`,
+  `^(${OVERUSED_VERB_STEMS.map(toStemPrefix).join('|')})`,
   'i',
 )
+
+// ── Regex fallback for verb conjugation ──────────────────────────────────────
+//
+// The NLP path (verbViolations) requires the POS tagger to tag the word as #Verb.
+// For ambiguous words like "streamlines" / "fosters", the two-tier tagger sometimes
+// tags them as Noun (especially 3rd-person singular forms, which look like plurals).
+// This regex fallback catches -s/-es and -ing forms directly and provides the
+// correctly conjugated replacement, covering the gap.
+//
+// Past tense (-ed/-d) is intentionally excluded: the NLP tagger correctly handles
+// past tense forms (they're unambiguous), and past-tense substitutions for
+// irregular replacements (get→got, build→built) would require a separate lookup.
+// Base forms are also excluded: the NLP path handles them correctly.
+//
+// Deduplication in index.ts ensures no double-flagging when both paths fire.
+
+function addS(verb: string): string {
+  if (verb === 'have') return 'has'   // irregular: boast → have → has
+  if (verb.endsWith('y') && !/[aeiou]y$/i.test(verb)) return verb.slice(0, -1) + 'ies'
+  if (/([sxz]|[sc]h)$/i.test(verb)) return verb + 'es'
+  return verb + 's'
+}
+
+function addIng(verb: string): string {
+  if (verb === 'get') return 'getting'  // irregular: garner → get → getting
+  if (verb.endsWith('e')) return verb.slice(0, -1) + 'ing'
+  return verb + 'ing'
+}
+
+/**
+ * Regex fallback: detect 3rd-person singular and gerund forms of VERB_INTENSIFIERS
+ * that the NLP POS tagger misclassifies as nouns. Provides the conjugated replacement.
+ */
+export function detectVerbIntensifierForms(text: string): Violation[] {
+  const violations: Violation[] = []
+  for (const stem of OVERUSED_VERB_STEMS) {
+    const replacement = VERB_REPLACEMENTS[stem]
+    if (replacement === undefined) continue  // no clean swap (delve, embark, resonate)
+    const prefix = toStemPrefix(stem)
+    const sForm = stem.endsWith('e') ? prefix + 'es' : prefix + 's'
+    const ingForm = prefix + 'ing'
+    for (const [form, suggestion] of [[sForm, addS(replacement)], [ingForm, addIng(replacement)]] as [string, string][]) {
+      const re = new RegExp(`\\b${form}\\b`, 'gi')
+      let m: RegExpExecArray | null
+      while ((m = re.exec(text)) !== null) {
+        violations.push({
+          ruleId: 'overused-intensifiers',
+          startIndex: m.index,
+          endIndex: m.index + m[0].length,
+          matchedText: m[0],
+          suggestedChange: suggestion,
+        })
+      }
+    }
+  }
+  return violations
+}
 
 /** Run all NLP sub-detectors on a pre-parsed doc; positions are chunk-relative */
 function runNlpDetectors(doc: NlpDoc, chunkText: string): Violation[] {

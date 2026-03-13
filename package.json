@@ -29,6 +29,8 @@
     "compromise": "^14.15.0",
     "diff": "^8.0.3",
     "react": "^19.2.4",
-    "react-dom": "^19.2.4"
+    "react-dom": "^19.2.4",
+    "retext": "^9.0.0",
+    "retext-indefinite-article": "^5.0.0"
   }
 }

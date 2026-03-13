@@ -8,6 +8,9 @@ export interface PopoverViolationData {
   matchedText: string
   explanation?: string
   suggestedChange?: string | null
+  applyStartIndex?: number
+  applyEndIndex?: number
+  applyReplacement?: string
 }
 
 export interface PopoverState {
@@ -87,7 +90,8 @@ const POPOVER_WIDTH = 380
 export default function Popover({ state, onClose, onApply, onNextRule, onPrevRule }: Props) {
   const { rules, violations, anchorRect, ruleIndex } = state
   const rule = rules[ruleIndex]
-  const { startIndex, endIndex, matchedText, explanation, suggestedChange } = violations[ruleIndex] ?? violations[0]
+  const { startIndex, endIndex, matchedText, explanation, suggestedChange,
+          applyStartIndex, applyEndIndex, applyReplacement } = violations[ruleIndex] ?? violations[0]
   const popoverRef = useRef<HTMLDivElement>(null)
 
   const top = anchorRect.bottom + window.scrollY + 8
@@ -183,7 +187,11 @@ export default function Popover({ state, onClose, onApply, onNextRule, onPrevRul
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           {suggestedChange !== null && (suggestedChange !== undefined || rule.canRemove) && (
             <button
-              onClick={() => onApply(startIndex, endIndex, suggestedChange ?? '')}
+              onClick={() => onApply(
+                applyStartIndex ?? startIndex,
+                applyEndIndex ?? endIndex,
+                applyReplacement ?? suggestedChange ?? '',
+              )}
               style={{
                 background: '#16a34a', color: '#fff', border: 'none',
                 borderRadius: '6px', padding: '8px 16px', cursor: 'pointer',

@@ -1,5 +1,13 @@
+import { retext } from 'retext'
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore — retext-indefinite-article ships its own types but path varies by bundler
+import retextIndefiniteArticle from 'retext-indefinite-article'
+import nlp from './nlpInstance'
 import type { Violation } from '../types'
-import { detectContextualSlop } from './nlpPatterns'
+
+// Pre-built processor — reused across all calls
+const articleProcessor = retext().use(retextIndefiniteArticle)
+import { detectContextualSlop, detectVerbIntensifierForms } from './nlpPatterns'
 import {
   detectOverusedIntensifiers,
   detectElevatedRegister,
@@ -75,32 +83,54 @@ export function runClientDetectors(text: string): Violation[] {
     ...detectDramaticFragment(text),
     ...detectSuperficialAnalysis(text),
     ...detectFalseRange(text),
+    ...detectVerbIntensifierForms(text),
     ...detectContextualSlop(text),
   ]
   const deduped = deduplicateViolations(all)
-  return fixArticleContext(suppressDanglingModifiers(deduped, text), text)
+  return fixArticleContext(suppressUnsafeDeletions(deduped, text), text)
 }
 
+// Linking verbs that introduce a predicate adjective. Deleting the adjective
+// directly after one of these leaves a broken sentence: "X is for Y" is not
+// what the author wrote — "X is [adj] for Y" was. Both copulative and
+// semi-copulative verbs are included (become, remain, seem, appear, look, feel).
+const LINKING_VERB_RE = /\b(is|was|are|were|am|be|been|being|becomes?|became|remains?|remained|seems?|appeared?|appears?|looks?|felt|feels?|sounds?|gets?|got)\s+$/i
+
 /**
- * Suppress deletion for violations preceded by a degree modifier (most/more/least/less).
- * Deleting the adjective in "most comprehensive map" leaves "most map" — nonsensical.
- * Sets suggestedChange: null so the popover shows the tip but no Apply button.
+ * Suppress unsafe deletions for adjective-position violations. Two cases:
+ *
+ * 1. Predicate adjective ("distinction is vital for X"):
+ *    Deleting "vital" leaves "distinction is for X" — broken.
+ *    Detected by a linking verb immediately before the violation.
+ *
+ * 2. Dangling modifier ("most comprehensive overview"):
+ *    Deleting "comprehensive" leaves "most overview" — nonsensical.
+ *    Detected by a degree modifier or adverb immediately before.
+ *
+ * Both cases set suggestedChange: null so the popover shows the tip but
+ * no Apply button — the user must rewrite the sentence.
  */
-function suppressDanglingModifiers(violations: Violation[], text: string): Violation[] {
-  const degreeModifiers = /\b(most|more|least|less|very|quite|so|too|as|truly|highly|extremely|deeply|utterly|remarkably|particularly|especially|increasingly|genuinely|incredibly|immensely|exceedingly|notably)\s+$/i
+function suppressUnsafeDeletions(violations: Violation[], text: string): Violation[] {
   return violations.map(v => {
-    if (v.suggestedChange !== undefined && v.suggestedChange !== '') return v  // has a real suggestion — leave it
+    if (v.suggestedChange !== undefined && v.suggestedChange !== '') return v
     const before = text.slice(0, v.startIndex)
-    if (!degreeModifiers.test(before)) return v
-    return { ...v, suggestedChange: null }
+    // Case 1: predicate adjective position
+    if (LINKING_VERB_RE.test(before)) return { ...v, suggestedChange: null }
+    // Case 2: preceded by degree modifier or adverb
+    const precedingWord = before.match(/\b(\w+)\s+$/)?.[1]
+    if (!precedingWord) return v
+    const isModifier =
+      /^(most|more|least|less)$/i.test(precedingWord) ||
+      nlp(precedingWord).has('#Adverb')
+    return isModifier ? { ...v, suggestedChange: null } : v
   })
 }
 
 /**
  * For violations where applying the change would leave a wrong article ("a"/"an"),
  * expand the span backwards to include the article and set the correct one as the
- * suggestion. E.g. "a dynamic" (delete "dynamic") → expand to "a dynamic" → "an".
- * Works for any rule — deletions, replacements, and canRemove fallbacks.
+ * suggestion. Uses retext-indefinite-article for phoneme-aware correction — handles
+ * "an hour", "a uniform", "an API", "a one-time" etc. that letter-checking misses.
  */
 function fixArticleContext(violations: Violation[], text: string): Violation[] {
   return violations.map(v => {
@@ -112,15 +142,20 @@ function fixArticleContext(violations: Violation[], text: string): Violation[] {
     const articleMatch = before.match(/\b(a|an) $/i)
     if (!articleMatch) return v
 
-    // What is the first character of the text that will follow the article?
-    const afterReplacement = replacement + text.slice(v.endIndex)
-    const firstChar = afterReplacement.trimStart()[0]?.toLowerCase() ?? ''
-    const needsAn = 'aeiou'.includes(firstChar)
-    const currentArticle = articleMatch[1].toLowerCase()
-    const correctArticle = needsAn ? 'an' : 'a'
-    if (currentArticle === correctArticle) return v  // already correct
+    // What is the first word that will appear after the article post-change?
+    const afterChange = replacement + text.slice(v.endIndex)
+    const firstWord = afterChange.trimStart().match(/^[^\s,;.!?]+/)?.[0]
+    if (!firstWord) return v
 
-    // Expand the violation to include the article
+    // Ask retext: is "currentArticle firstWord" correct?
+    // processSync is synchronous — no async needed.
+    const file = articleProcessor.processSync(`${articleMatch[1]} ${firstWord}.`)
+    if (!file.messages.length) return v  // article is already correct
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const correctArticle = (file.messages[0] as any).expected?.[0]
+    if (!correctArticle) return v
+
     const articleStart = v.startIndex - articleMatch[0].length
     return {
       ...v,

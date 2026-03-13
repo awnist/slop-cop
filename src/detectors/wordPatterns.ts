@@ -41,7 +41,7 @@ export const VERB_INTENSIFIERS = [
   'bolster', 'emphasize', 'enhance', 'garner',
 ]
 
-const ELEVATED_REGISTER: [string, string][] = [
+const ELEVATED_REGISTER: [string, string | null][] = [
   ['utilize', 'use'],
   ['utilise', 'use'],
   ['utilization', 'use'],
@@ -59,7 +59,7 @@ const ELEVATED_REGISTER: [string, string][] = [
   ['pertaining to', 'about'],
   ['in regards to', 'about'],
   ['with regards to', 'about'],
-  ['in the context of', 'in'],
+  ['in the context of', null],  // replacement is too context-dependent to automate
   ['at this juncture', 'now'],
   ['going forward', 'in future'],
   ['moving forward', 'in future'],
@@ -151,7 +151,7 @@ export function detectElevatedRegister(text: string): Violation[] {
         startIndex: m.index,
         endIndex: m.index + m[0].length,
         matchedText: m[0],
-        suggestedChange: replacement || undefined,
+        suggestedChange: replacement === null ? null : (replacement || undefined),
       })
     }
   }
@@ -212,21 +212,27 @@ export function detectFalseConclusion(text: string): Violation[] {
 
 export function detectConnectorAddiction(text: string): Violation[] {
   // Flag connectors at start of paragraphs/sentences.
-  // Captures the leading boundary and the first char of the next word so we can
-  // suggest: keep boundary + capitalize next word (drop connector + comma entirely).
+  // Highlight span = just the connector phrase ("For instance,").
+  // Apply span = boundary + connector + next char, so Apply can drop the connector
+  // and capitalize the following word without a separate cleanup step.
   const violations: Violation[] = []
   for (const word of CONNECTOR_WORDS) {
     const escaped = word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
     const re = new RegExp(`(^|\\n\\s*|[.!?]\\s+)(${escaped}[,\\s]+)(\\w)`, 'gi')
     let m: RegExpExecArray | null
     while ((m = re.exec(text)) !== null) {
-      const [fullMatch, boundary, , nextChar] = m
+      const [fullMatch, boundary, connector, nextChar] = m
+      const highlightStart = m.index + boundary.length
+      const highlightEnd = highlightStart + connector.trimEnd().length
       violations.push({
         ruleId: 'connector-addiction',
-        startIndex: m.index,
-        endIndex: m.index + fullMatch.length,
-        matchedText: fullMatch,
-        suggestedChange: boundary + nextChar.toUpperCase(),
+        startIndex: highlightStart,
+        endIndex: highlightEnd,
+        matchedText: text.slice(highlightStart, highlightEnd),
+        suggestedChange: '',
+        applyStartIndex: m.index,
+        applyEndIndex: m.index + fullMatch.length,
+        applyReplacement: boundary + nextChar.toUpperCase(),
       })
     }
   }

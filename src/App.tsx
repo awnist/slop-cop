@@ -250,6 +250,9 @@ export default function App() {
         matchedText: v?.matchedText ?? matchedText,
         explanation: v?.explanation,
         suggestedChange: v?.suggestedChange,
+        applyStartIndex: v?.applyStartIndex,
+        applyEndIndex: v?.applyEndIndex,
+        applyReplacement: v?.applyReplacement,
       }
     })
 
