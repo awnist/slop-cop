@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectContextualSlop, detectVerbIntensifierForms, detectTripleConstruction } from '../nlpPatterns'
+import { detectContextualSlop, detectVerbIntensifierForms, detectTripleConstruction, detectShortHookParagraph } from '../nlpPatterns'
 import { runClientDetectors } from '../index'
 import type { Violation } from '../../types'
 
@@ -535,5 +535,76 @@ describe('detectTripleConstruction', () => {
   it('does not flag a sentence with fewer than two commas', () => {
     const vs = detectTripleConstruction('Speed and clarity matter.')
     expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(false)
+  })
+})
+
+// ── Short-hook paragraph ──────────────────────────────────────────────────────
+
+const HOOK_PARA_1 = `Attrition, left unchecked, accelerates. A study published in the Journal of Applied Psychology found that disengaged employees are nearly three times more likely to leave within twelve months than their engaged counterparts. Bureau of Labor Statistics data confirms that voluntary separations in knowledge-work sectors have outpaced involuntary ones every quarter since 2018. Internal surveys consistently show that the top driver of departure is a perceived lack of autonomy. The pattern holds across industries and firm sizes.`
+
+const HOOK_PARA_2 = `Leaders face a structural choice. They can continue optimizing for visibility and control, accepting the associated costs in morale and turnover, or they can shift toward outcome-based management that measures results rather than presence. Companies that have made that shift report shorter decision cycles and higher employee satisfaction scores. The evidence does not favor delay.`
+
+describe('detectShortHookParagraph', () => {
+  it('flags the short opener in a hook+evidence paragraph', () => {
+    const vs = detectShortHookParagraph(HOOK_PARA_1)
+    expect(vs).toHaveLength(1)
+    expect(vs[0].ruleId).toBe('short-hook-paragraph')
+    expect(vs[0].matchedText).toMatch(/Attrition/)
+  })
+
+  it('flags both openers when two hook paragraphs are separated by a blank line', () => {
+    const text = HOOK_PARA_1 + '\n\n' + HOOK_PARA_2
+    const vs = detectShortHookParagraph(text)
+    expect(vs).toHaveLength(2)
+    expect(vs[0].matchedText).toMatch(/Attrition/)
+    expect(vs[1].matchedText).toMatch(/Leaders/)
+  })
+
+  it('offsets are correct for second paragraph', () => {
+    const text = HOOK_PARA_1 + '\n\n' + HOOK_PARA_2
+    const vs = detectShortHookParagraph(text)
+    const second = vs[1]
+    expect(text.slice(second.startIndex, second.endIndex)).toBe(second.matchedText)
+  })
+
+  it('does not flag a two-sentence paragraph', () => {
+    const vs = detectShortHookParagraph('Costs rise. Operational overhead increases substantially when teams are distributed across multiple time zones without clear coordination protocols.')
+    expect(vs).toHaveLength(0)
+  })
+
+  it('flags a 3-sentence hook+elaboration paragraph', () => {
+    const vs = detectShortHookParagraph(
+      'The cost structure is unforgiving. When hiring timelines stretch beyond ninety days, engineering teams lose momentum on roadmap items that had already been scoped and estimated, creating compounding delays that affect downstream dependencies. Backfilling a senior role typically costs between fifty and two hundred percent of annual salary once recruiting fees, onboarding time, and productivity ramp are factored in.'
+    )
+    expect(vs).toHaveLength(1)
+    expect(vs[0].matchedText).toMatch(/cost structure/)
+  })
+
+  it('flags a 9-word opener with long elaborations', () => {
+    const vs = detectShortHookParagraph(
+      'Retention outcomes show up directly in operating costs. A McKinsey analysis of mid-market technology firms found that reducing voluntary attrition by ten percentage points lowered annualized labor costs by an average of eight percent, net of any investment in engagement programs. That figure compounds over a three-year horizon into a measurable margin improvement.'
+    )
+    expect(vs).toHaveLength(1)
+    expect(vs[0].matchedText).toMatch(/Retention/)
+  })
+
+  it('flags an 8-word opener even when a closing sentence is short', () => {
+    const vs = detectShortHookParagraph(
+      'The longitudinal evidence on this question is now substantial. Three separate cohort studies tracking knowledge workers across a five-year period found that those given schedule autonomy reported higher job satisfaction and lower burnout scores than peers in structured office environments. A fourth study, focused specifically on caregivers, found even larger effects, particularly among workers with children under twelve. The direction of the finding is consistent. The magnitude varies by role type.'
+    )
+    expect(vs).toHaveLength(1)
+    expect(vs[0].matchedText).toMatch(/longitudinal/)
+  })
+
+  it('does not flag when opener is long (>10 words)', () => {
+    const long = 'This is a longer opening sentence that has more than ten words in it here. The second sentence is even longer and provides substantial additional context and detail. The third sentence continues the elaboration with more supporting evidence and examples. The fourth sentence wraps things up with a final conclusion.'
+    const vs = detectShortHookParagraph(long)
+    expect(vs).toHaveLength(0)
+  })
+
+  it('does not flag when all sentences are similarly short', () => {
+    const even = 'It works. It scales. It ships. It saves time and money too.'
+    const vs = detectShortHookParagraph(even)
+    expect(vs).toHaveLength(0)
   })
 })

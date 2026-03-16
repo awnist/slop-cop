@@ -307,6 +307,55 @@ export function detectContextualSlop(text: string): Violation[] {
   return violations
 }
 
+// ── Short-hook paragraph ──────────────────────────────────────────────────────
+
+/**
+ * Detect the "short hook + evidence pile" paragraph rhythm:
+ * a punchy opener of ≤8 words followed by 3+ substantially longer sentences.
+ * Uses compromise sentence tokenization (handles abbreviations, initials, etc.)
+ * rather than naive `.` splitting.
+ */
+export function detectShortHookParagraph(text: string): Violation[] {
+  const violations: Violation[] = []
+  // Split into paragraphs, preserving separator lengths for accurate offsets
+  const parts = text.split(/(\n\n+)/)
+  let pos = 0
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i]
+    if (i % 2 === 1) { pos += part.length; continue }  // separator
+    const para = part
+    const paraOffset = pos
+    pos += para.length
+
+    // Quick pre-filter: need at least 2 sentence-ending punctuation marks
+    if ((para.match(/[.!?]/g) ?? []).length < 2) continue
+
+    // Split on sentence-ending punctuation followed by whitespace + capital letter.
+    // compromise/two doesn't include the sentences plugin; a regex split is
+    // sufficient here since we only need sentence count and word counts.
+    const sentences = para.split(/(?<=[.!?])\s+(?=[A-Z"'])/).map(s => s.trim()).filter(Boolean)
+    if (sentences.length < 3) continue
+
+    const wordCount = (s: string) => s.trim().split(/\s+/).length
+    const firstWords = wordCount(sentences[0])
+    if (firstWords > 10) continue
+
+    const restLengths = sentences.slice(1).map(wordCount)
+    const restAvg = restLengths.reduce((a, b) => a + b, 0) / restLengths.length
+    if (restAvg < firstWords * 1.5 || restAvg < 12) continue
+
+    const firstStart = para.indexOf(sentences[0])
+    if (firstStart === -1) continue
+    violations.push({
+      ruleId: 'short-hook-paragraph',
+      startIndex: paraOffset + firstStart,
+      endIndex: paraOffset + firstStart + sentences[0].length,
+      matchedText: sentences[0],
+    })
+  }
+  return violations
+}
+
 // ── Triple construction ───────────────────────────────────────────────────────
 
 

@@ -461,6 +461,20 @@ export const RULES: ViolationRule[] = [
     llmDirective: "Do not use invented concept labels ('the X paradox', 'the Y vacuum', 'the Z creep') — describe the phenomenon in plain terms.",
   },
 
+  {
+    id: 'short-hook-paragraph',
+    name: 'Short-Hook Paragraph',
+    category: 'sentence-structure',
+    description: 'A short punchy opener (≤10 words) followed by two or more substantially longer elaboration sentences — the LLM "hook then evidence pile" rhythm.',
+    tip: 'Expand the opener into a complete thought, or absorb it into the first elaboration sentence. The sharp length contrast signals formulaic structure.',
+    canRemove: false,
+    color: '#22d3ee',
+    bgColor: 'rgba(34,211,238,0.15)',
+    requiresLLM: false,
+    rewriteHint: 'Expand this short opener into a complete sentence, or merge it with the sentence that follows.',
+    llmDirective: 'Do not open a paragraph with a short punchy fragment followed by a pile of longer elaboration sentences — develop the opening idea fully.',
+  },
+
   // ── LLM-required semantic detections ─────────────────────────────────────
   {
     id: 'triple-construction',
