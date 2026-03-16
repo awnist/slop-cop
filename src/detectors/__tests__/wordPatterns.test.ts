@@ -373,6 +373,25 @@ describe('detectNegationPivot', () => {
   it('does not flag two sentences with different subjects', () => {
     assertSilent(detectNegationPivot("She doesn't like the proposal. He thinks it has merit."), 'negation-pivot')
   })
+  it('flags trailing ", not a [noun]" negation', () => {
+    assertFires(detectNegationPivot('The research frames remote-first as a deliberate operating model anchored in trust, clarity and well-designed touchpoints, not a stopgap.'), 'negation-pivot')
+    assertFires(detectNegationPivot('It is a deliberate choice, not an accident.'), 'negation-pivot')
+    assertFires(detectNegationPivot('Remote-first is a competitive advantage, not a compromise.'), 'negation-pivot')
+  })
+  it('does not flag natural negation without article', () => {
+    assertSilent(detectNegationPivot('The results were fast, not slow.'), 'negation-pivot')
+  })
+  it('flags "rather than" contrast', () => {
+    assertFires(detectNegationPivot('policies that reflect labor market realities rather than nostalgic preferences.'), 'negation-pivot')
+    assertFires(detectNegationPivot('We should act on evidence rather than on assumptions.'), 'negation-pivot')
+  })
+  it('does not flag short "rather than" contrasts', () => {
+    assertSilent(detectNegationPivot('She chose to walk rather than run.'), 'negation-pivot')
+  })
+  it('flags semicolon negation pivot', () => {
+    assertFires(detectNegationPivot('These are not isolated anecdotes; they are economy-wide patterns.'), 'negation-pivot')
+    assertFires(detectNegationPivot('This is not a coincidence; it is a pattern.'), 'negation-pivot')
+  })
 })
 
 // ── Colon Elaboration ──────────────────────────────────────────────────────

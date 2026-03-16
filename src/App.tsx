@@ -729,7 +729,7 @@ export default function App() {
               <div style={{
                 position: 'absolute',
                 top: 0,
-                left: 0,
+                left: '52px',
                 pointerEvents: 'none',
                 fontSize: '18px',
                 lineHeight: '1.9',

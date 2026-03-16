@@ -16,11 +16,11 @@ This is not a plagiarism detector. The question isn't whether text was written b
 
 Detection runs in two tiers:
 
-**Client-side (instant):** 35 rules implemented as regex and structural analysis. Fire on every keystroke after a 350ms debounce. No API key needed.
+**Client-side (instant):** 36 rules implemented as regex and structural analysis. Fire on every keystroke after a 350ms debounce. No API key needed.
 
 **Semantic (optional):** Two parallel calls to the selected LLM provider API (Anthropic or OpenAI), triggered manually:
 
-- *Fast pass* — Claude Haiku (~5s): sentence and paragraph-level patterns that require language understanding (triple construction, sycophantic framing, unnecessary elaboration, etc.). Large documents are automatically split into overlapping chunks and analyzed in parallel for better coverage.
+- *Fast pass* — Claude Haiku (~5s): sentence and paragraph-level patterns that require language understanding (sycophantic framing, unnecessary elaboration, etc.). Large documents are automatically split into overlapping chunks and analyzed in parallel for better coverage.
 - *Deep pass* — Claude Sonnet (~15s): document-level patterns only visible at scale (dead metaphor repetition, one-point dilution, fractal summaries)
 
 API calls go directly from your browser to the provider you choose (Anthropic or OpenAI). No server. Your key is stored in `localStorage` and never leaves your machine.
@@ -67,11 +67,12 @@ API calls go directly from your browser to the provider you choose (Anthropic or
 | Dramatic Fragment         | One-to-four-word standalone paragraph used for emphasis                                                               |
 | Superficial Analysis      | `, [participle] its/the/their/this [importance/role/significance]` — empty summarizing phrase                         |
 | False Range               | Hollow `from X to Y` constructions; `doesn't emerge from nowhere`                                                     |
+| Triple Construction       | Exactly three parallel items: `X, Y, and Z` — the LLM default                                                        |
 
 
 ### Semantic — fast pass (Claude Haiku or GPT-4.5 mini)
 
-Triple Construction · Throat-Clearing Opener · Sycophantic Frame · Balanced Take · Unnecessary Elaboration · Empathy Performance · Pivot Paragraph · Grandiose Stakes · Historical Analogy Stack · False Vulnerability
+Throat-Clearing Opener · Sycophantic Frame · Balanced Take · Unnecessary Elaboration · Empathy Performance · Pivot Paragraph · Grandiose Stakes · Historical Analogy Stack · False Vulnerability
 
 ### Semantic — deep pass (Claude Sonnet or GPT-4.5)
 
@@ -83,7 +84,7 @@ Dead Metaphor · One-Point Dilution · Fractal Summaries
 pnpm install
 pnpm dev        # localhost:5173
 pnpm build      # type-check + production build
-pnpm test       # client-side unit tests (199 tests, no API key needed)
+pnpm test       # client-side unit tests (285 tests, no API key needed)
 pnpm test:llm   # LLM integration tests (requires ANTHROPIC_API_KEY in .env)
 ```
 

@@ -237,7 +237,6 @@ const REWRITE_DEFAULT_RULE_IDS = [
   'hedge-stack',            // remove stacked hedges
   'unnecessary-elaboration',// stop when the sentence is done
   'grandiose-stakes',       // scale claims to evidence
-  'triple-construction',    // avoid rule of three
   'em-dash-pivot',          // replace em-dashes with correct punctuation
   'balanced-take',          // remove balanced take
 ]

@@ -8,7 +8,7 @@ Web app that detects LLM-generated prose patterns in text and highlights them wi
 - **pnpm** — use pnpm for all package operations, never npm or yarn
 - `pnpm dev` — dev server on localhost:5173
 - `pnpm build` — type-check + build to `dist/`
-- `pnpm test` — Vitest unit tests (189 tests, all client-side detectors)
+- `pnpm test` — Vitest unit tests (285 tests, all client-side detectors)
 
 ## Architecture
 
@@ -22,6 +22,7 @@ src/
   detectors/
     index.ts                 # runClientDetectors() — calls all regex/structural detectors
     wordPatterns.ts          # All client-side detectors (word lists, regex, sentence analysis)
+    nlpPatterns.ts           # NLP-assisted detectors using compromise (context-sensitive, sentence-chunked)
     llmDetectors.ts          # Claude API calls for semantic detections (two-tier)
   components/
     Toolbar.tsx              # Top bar: branding, API key management, LLM run button
@@ -39,7 +40,7 @@ src/
 
 **Semantic (optional):** requires an Anthropic API key entered in the toolbar. Two parallel API calls fire when the user clicks "Run semantic analysis":
 
-1. **Fast pass** — `claude-haiku-4-5-20251001`, 30s timeout. Sentence and paragraph-level patterns (11 rules): triple construction, throat-clearing, sycophantic frame, balanced take, unnecessary elaboration, empathy performance, pivot paragraph, grandiose stakes, historical analogy, false vulnerability, false range (subtle cases).
+1. **Fast pass** — `claude-haiku-4-5-20251001`, 30s timeout. Sentence and paragraph-level patterns (10 rules): throat-clearing, sycophantic frame, balanced take, unnecessary elaboration, empathy performance, pivot paragraph, grandiose stakes, historical analogy, false vulnerability, false range (subtle cases).
 2. **Deep pass** — `claude-sonnet-4-6`, 60s timeout. Document-level structural patterns (3 rules): dead metaphor, one-point dilution, fractal summaries.
 
 Both calls use `anthropic-dangerous-direct-browser-access: true` to enable CORS directly from the browser. No proxy needed. Results from the fast pass appear first; deep pass results merge in when Sonnet finishes. Status: `idle → loading → done/error`. Editing after analysis sets status to `stale`, showing a "Re-analyze" button.
@@ -58,8 +59,8 @@ Each rule in `src/rules.ts` has:
 
 ## Rules count
 
-- **Client-side rules:** 35
-- **LLM-required rules:** 13 (10 sentence-level + 3 document-level)
+- **Client-side rules:** 36
+- **LLM-required rules:** 12 (9 sentence-level + 3 document-level)
 - **Total:** 48
 
 ## Adding a new rule

@@ -31,7 +31,6 @@ type NlpDoc = any
 // undefined = no suggestion (verb is too context-dependent to auto-replace)
 const VERB_REPLACEMENTS: Record<string, string | undefined> = {
   showcase:   'show',
-  highlight:  'show',
   boast:      'have',
   // Moved from INTENSIFIERS — verb deletion breaks sentences
   leverage:   'use',
@@ -210,7 +209,7 @@ function inAWayViolations(doc: NlpDoc, _chunkText: string, ruleId: string): Viol
 }
 
 // All verb stems flagged as overused-intensifiers, combined for a single regex pass
-const OVERUSED_VERB_STEMS = ['highlight', 'showcase', 'boast', ...VERB_INTENSIFIERS]
+const OVERUSED_VERB_STEMS = ['showcase', 'boast', ...VERB_INTENSIFIERS]
 const OVERUSED_VERB_RE = new RegExp(
   `^(${OVERUSED_VERB_STEMS.map(toStemPrefix).join('|')})`,
   'i',
@@ -303,6 +302,41 @@ export function detectContextualSlop(text: string): Violation[] {
     const doc = nlp(chunk)
     for (const v of runNlpDetectors(doc, chunk)) {
       violations.push({ ...v, startIndex: v.startIndex + offset, endIndex: v.endIndex + offset })
+    }
+  }
+  return violations
+}
+
+// ── Triple construction ───────────────────────────────────────────────────────
+
+
+export function detectTripleConstruction(text: string): Violation[] {
+  if (!text.includes(',')) return []
+
+  // Collect one sentence window per comma position (same pattern as detectContextualSlop)
+  const windows = new Map<number, { text: string; offset: number }>()
+  let pos = text.indexOf(',')
+  while (pos !== -1) {
+    const sentence = extractSentenceAt(text, pos)
+    windows.set(sentence.offset, sentence)
+    pos = text.indexOf(',', pos + 1)
+  }
+
+  const violations: Violation[] = []
+  for (const { text: chunk, offset } of windows.values()) {
+    let m: RegExpExecArray | null
+
+    // "A, B, and C" — Oxford comma form; all items up to 70 chars
+    const oxfordRe = /([^,\n]{3,70}),\s+([^,\n]{3,70}),\s+(?:and|or)\s+([^,.!?\n]{3,70})/gi
+    while ((m = oxfordRe.exec(chunk)) !== null) {
+      violations.push({ ruleId: 'triple-construction', startIndex: offset + m.index, endIndex: offset + m.index + m[0].length, matchedText: m[0] })
+    }
+
+    // "A, B and C" — no Oxford comma; B must be short (1–3 words) to avoid matching
+    // clause-internal "and" like "you absorb morale damage and replacement costs"
+    const noOxfordRe = /([^,\n]{3,70}),\s+([\w-]+(?:\s+[\w-]+){0,2})\s+(?:and|or)\s+([^,.!?\n]{3,70})/gi
+    while ((m = noOxfordRe.exec(chunk)) !== null) {
+      violations.push({ ruleId: 'triple-construction', startIndex: offset + m.index, endIndex: offset + m.index + m[0].length, matchedText: m[0] })
     }
   }
   return violations

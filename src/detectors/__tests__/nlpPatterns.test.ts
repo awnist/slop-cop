@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { detectContextualSlop, detectVerbIntensifierForms } from '../nlpPatterns'
+import { detectContextualSlop, detectVerbIntensifierForms, detectTripleConstruction } from '../nlpPatterns'
 import { runClientDetectors } from '../index'
 import type { Violation } from '../../types'
 
@@ -93,9 +93,14 @@ describe('detectContextualSlop — verb detection', () => {
     expect(vs.some(v => /showcase/i.test(v.matchedText))).toBe(true)
   })
 
-  it('flags "highlight" as verb', () => {
-    const vs = nlpViolations('This example will highlight the key differences.')
+  it('flags "highlight" before abstract noun', () => {
+    const vs = runClientDetectors('This highlights the importance of testing.')
     expect(vs.some(v => /highlight/i.test(v.matchedText))).toBe(true)
+  })
+
+  it('does not flag "highlight" in literal use', () => {
+    const vs = runClientDetectors('The app highlights them in real time.')
+    expect(vs.some(v => /highlight/i.test(v.matchedText))).toBe(false)
   })
 })
 
@@ -505,5 +510,30 @@ describe('detectContextualSlop — pre-filter (no false positives)', () => {
   it('does not flag "sense" alone (no adjective before it)', () => {
     const vs = nlpViolations('That makes a lot of sense to me.')
     expect(vs.some(v => v.ruleId === 'overused-intensifiers')).toBe(false)
+  })
+})
+
+// ── Triple construction ───────────────────────────────────────────────────────
+
+describe('detectTripleConstruction', () => {
+  it('flags three parallel nouns', () => {
+    const vs = detectTripleConstruction('It embodies innovation, disruption, and transformation.')
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(true)
+  })
+  it('flags infinitive phrase triplets', () => {
+    const vs = detectTripleConstruction('Leaders prioritize flexibility to widen and diversify their pipelines, to improve well-being, and to sustain trust.')
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(true)
+  })
+  it('flags triplets with long items', () => {
+    const vs = detectTripleConstruction('Remote-first policies broaden access to caregivers, people with disabilities, and candidates outside premium cost-of-living markets.')
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(true)
+  })
+  it('flags triplets without Oxford comma', () => {
+    const vs = detectTripleConstruction('The approach pairs intentional gatherings, clear policies and outcome-based performance management.')
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(true)
+  })
+  it('does not flag a sentence with fewer than two commas', () => {
+    const vs = detectTripleConstruction('Speed and clarity matter.')
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(false)
   })
 })

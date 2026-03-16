@@ -126,10 +126,38 @@ const HEDGE_WORDS = [
   'feels kind of', 'seems kind of', 'sounds kind of', 'looks kind of',
 ]
 
+// Abstract nouns that follow "highlight(s/ed/ing) the" in LLM slop constructions.
+// Literal uses ("highlights the text", "highlights them") are excluded by this list.
+const HIGHLIGHT_ABSTRACT_NOUNS = /^(importance|need|significance|value|role|impact|fact|challenges?|complexity|potential|limitations?|urgency|gaps?|contrast|tensions?|reality|severity|concern|problems?|issues?|difficulty|difficulties|dangers?|failures?|successes?|inequalit(?:y|ies)|disparit(?:y|ies)|tradeoffs?)$/i
+
+export function detectHighlightSlop(text: string): Violation[] {
+  const violations: Violation[] = []
+  const re = /\b(highlights?|highlighted|highlighting)\s+the\s+(\w+)/gi
+  let m: RegExpExecArray | null
+  while ((m = re.exec(text)) !== null) {
+    if (!HIGHLIGHT_ABSTRACT_NOUNS.test(m[2])) continue
+    const verbText = m[1]
+    let suggestion: string
+    const lower = verbText.toLowerCase()
+    if (lower.endsWith('ing')) suggestion = 'showing'
+    else if (lower.endsWith('ed')) suggestion = 'showed'
+    else if (lower.endsWith('s')) suggestion = 'shows'
+    else suggestion = 'show'
+    violations.push({
+      ruleId: 'overused-intensifiers',
+      startIndex: m.index,
+      endIndex: m.index + verbText.length,
+      matchedText: verbText,
+      suggestedChange: suggestion,
+    })
+  }
+  return violations
+}
+
 export function detectOverusedIntensifiers(text: string): Violation[] {
   const violations: Violation[] = []
   for (const word of INTENSIFIERS) {
-    const re = new RegExp(`\\b${word}s?\\b`, 'gi')
+    const re = new RegExp(`\\b${word}s?(?:-\\w+)*\\b`, 'gi')
     violations.push(...findAll(text, re, 'overused-intensifiers'))
   }
   for (const phrase of INTENSIFIER_PHRASES) {
@@ -278,7 +306,18 @@ export function detectNegationPivot(text: string): Violation[] {
   const commaButRe = new RegExp(`\\b(${NEGATIONS})\\b[^.!?\\n]{3,80},?\\s+but\\b`, 'gi')
   // "not X—Y" or "not X–Y" (em/en-dash pivot without "but") — capture one word after dash for clarity
   const emDashRe = new RegExp(`\\b(${NEGATIONS})\\b[^.!?\\n\u2014\u2013]{3,60}[\u2014\u2013]\\s*\\w+`, 'gi')
+  // "X rather than Y" — preference framing used to show nuance; LLM rhetorical staple
+  // Require 2+ words on each side to avoid short natural contrasts ("walk rather than run")
+  const ratherThanRe = /\b\w+(?:\s+\w+){1,6}\s+rather\s+than\s+\w+(?:\s+\w+){1,5}/gi
   let m: RegExpExecArray | null
+  while ((m = ratherThanRe.exec(text)) !== null) {
+    violations.push({
+      ruleId: 'negation-pivot',
+      startIndex: m.index,
+      endIndex: m.index + m[0].length,
+      matchedText: m[0],
+    })
+  }
   for (const re of [commaButRe, emDashRe]) {
     while ((m = re.exec(text)) !== null) {
       violations.push({
@@ -288,6 +327,32 @@ export function detectNegationPivot(text: string): Violation[] {
         matchedText: m[0],
       })
     }
+  }
+
+  // "not X; Y" — negation in the first semicolon clause is the structural tell
+  const semicolonPivotRe = new RegExp(
+    `\\b(${NEGATIONS})\\b[^;.!?\\n]{3,80};`,
+    'gi'
+  )
+  while ((m = semicolonPivotRe.exec(text)) !== null) {
+    violations.push({
+      ruleId: 'negation-pivot',
+      startIndex: m.index,
+      endIndex: m.index + m[0].length,
+      matchedText: m[0],
+    })
+  }
+
+  // "X, not a Y" / "X, not for Y" — trailing negation after a positive claim.
+  // Requires an article or preposition after "not" to avoid flagging natural adjective contrasts ("fast, not slow").
+  const trailingNotRe = /,\s+not\s+(?:just\s+|merely\s+|simply\s+)?(?:(?:a|an|the)|(?:for|in|by|with|to|about|on|of))\s+\w+(?:\s+\w+){0,3}/gi
+  while ((m = trailingNotRe.exec(text)) !== null) {
+    violations.push({
+      ruleId: 'negation-pivot',
+      startIndex: m.index,
+      endIndex: m.index + m[0].length,
+      matchedText: m[0],
+    })
   }
 
   // Two-sentence variant: "It doesn't X. It does Y."
