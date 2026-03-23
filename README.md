@@ -84,7 +84,7 @@ Dead Metaphor · One-Point Dilution · Fractal Summaries
 pnpm install
 pnpm dev        # localhost:5173
 pnpm build      # type-check + production build
-pnpm test       # client-side unit tests (285 tests, no API key needed)
+pnpm test       # client-side unit tests (299 tests, no API key needed)
 pnpm test:llm   # LLM integration tests (requires ANTHROPIC_API_KEY in .env)
 ```
 
@@ -99,7 +99,8 @@ src/
   types.ts                   # Shared types
   detectors/
     index.ts                 # runClientDetectors()
-    wordPatterns.ts          # All 35 client-side detectors
+    wordPatterns.ts          # Regex/structural detectors
+    nlpPatterns.ts           # NLP-assisted detectors (compromise)
     llmDetectors.ts          # Haiku + Sonnet API calls
   components/
     Toolbar.tsx              # Branding, API key entry, LLM run/re-analyze button

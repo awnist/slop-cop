@@ -75,6 +75,7 @@ Each rule in `src/rules.ts` has:
 - **`dramatic-fragment`**: Any paragraph with ≤4 words fires, including intentional short paragraphs in prose. High-precision but accept occasional FPs in minimalist writing.
 - **`concept-label`**: Matches any `[word] + (paradox|trap|creep|vacuum|inversion|chasm)` — will flag real established terms. Accept these FPs; the rule targets LLM prose inflation.
 - **`superficial-analysis`**: The `, [participle] its/the/their/this [noun]` pattern can occasionally match legitimate summarizing phrases. `canRemove: true` lets users dismiss easily.
+- **`triple-construction`**: Named-entity appositives are suppressed via a `#ProperNoun` check ("Dave Burwick, former CEO of Boston Beer, and Frank Luntz" does not fire). Common-noun appositives ("Fermentation, a necessary step in brewing, and aging…") remain false positives — every surface heuristic (article presence, item length) has clear counterexamples, and fixing them requires semantic understanding beyond compromise/two.
 
 ## Key constraints on detectors
 

@@ -536,6 +536,34 @@ describe('detectTripleConstruction', () => {
     const vs = detectTripleConstruction('Speed and clarity matter.')
     expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(false)
   })
+
+  it('does not flag a relative clause containing "and" (e.g. "categories, which span X and Y")', () => {
+    const vs = detectTripleConstruction("Qloo's superiority is most effectively demonstrated through the extreme granularity of its data categories, which span any and every latitude and longitude globally.")
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(false)
+  })
+
+  it('does not flag a "because/although" subordinate clause containing "and"', () => {
+    const vs = detectTripleConstruction('The model performed well, although training time and inference cost both increased substantially.')
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(false)
+  })
+
+  it('does not flag appositive + verb + "and as" subordinate clause', () => {
+    const vs = detectTripleConstruction('As Dr. Patricia Reyes, Director of Applied Research at the institute, noted, and as confirmed by subsequent peer review, the methodology held up under scrutiny.')
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(false)
+  })
+
+  it('does not flag named-entity appositive (Name, title phrase, and Name)', () => {
+    // "Marcus Webb, head of product strategy at Meridian Labs, and pollster Gina Torres"
+    // B="head of product strategy at Meridian Labs" is an appositive of A=Marcus Webb, not a list item
+    const vs = detectTripleConstruction('The panel included Marcus Webb, head of product strategy at Meridian Labs, and pollster Gina Torres.')
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(false)
+  })
+
+  it('still flags three proper nouns as a genuine list', () => {
+    // All three items are proper nouns — no appositive suppression should fire
+    const vs = detectTripleConstruction('The event featured Apple, Google, and Microsoft as sponsors.')
+    expect(vs.some(v => v.ruleId === 'triple-construction')).toBe(true)
+  })
 })
 
 // ── Short-hook paragraph ──────────────────────────────────────────────────────

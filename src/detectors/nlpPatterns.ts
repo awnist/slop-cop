@@ -371,20 +371,61 @@ export function detectTripleConstruction(text: string): Violation[] {
     pos = text.indexOf(',', pos + 1)
   }
 
+  // Appositive suppression for named-entity constructions.
+  //
+  // The Oxford comma regex can misfire on "Name, [appositive title], and Name" —
+  // e.g. "Marcus Webb, head of product strategy, and Gina Torres" — where B is a
+  // title phrase describing A rather than a parallel list item.
+  //
+  // The only reliable surface signal available in compromise/two is #ProperNoun:
+  // if A ends with a proper noun and B does NOT start with one, B is almost
+  // certainly an appositive of A. We suppress those cases.
+  //
+  // Known limitation — common-noun appositives are NOT suppressed:
+  //   "Fermentation, a necessary step in brewing, and aging both take time."
+  // B here ("a necessary step...") is also an appositive, but A ends with a
+  // common noun, so the ProperNoun signal is absent. Every heuristic we evaluated
+  // for the common-noun case (article presence, length ratio) had clear
+  // counterexamples and would cause new false negatives. Fixing it requires
+  // semantic understanding that compromise/two does not provide. Accepted as a
+  // known false positive at this level of NLP tooling.
+  //
+  // The "x " prefix ensures the real first word is never at index 0, which would
+  // bypass compromise/two's second-pass title-case ProperNoun tagger.
+  function endsWithProperNoun(t: string): boolean {
+    return nlp('x ' + t.trim()).terms().last().has('#ProperNoun')
+  }
+  function startsWithProperNoun(t: string): boolean {
+    return nlp('x ' + t.trim()).terms().eq(1).has('#ProperNoun')
+  }
+
   const violations: Violation[] = []
   for (const { text: chunk, offset } of windows.values()) {
     let m: RegExpExecArray | null
 
+    // Relative/subordinate clause openers — these are never list items.
+    // Also covers "and as reported/stated/noted" (C starting with "as").
+    const CLAUSE_OPENER = /^(?:which|that|who|whom|whose|where|when|because|although|since|though|while|as)\b/i
+
     // "A, B, and C" — Oxford comma form; all items up to 70 chars
+    // Guard: skip if B or C starts with a clause opener
+    // (e.g. "X, which does Y, and Z" or "Name, stated, and as reported by...")
+    // Also skip if A ends with a proper noun but B does NOT start with one —
+    // that pattern indicates B is an appositive title of A, not a parallel item.
+    // (e.g. "Dave Burwick, former CEO of Boston Beer, and Frank Luntz")
     const oxfordRe = /([^,\n]{3,70}),\s+([^,\n]{3,70}),\s+(?:and|or)\s+([^,.!?\n]{3,70})/gi
     while ((m = oxfordRe.exec(chunk)) !== null) {
+      if (CLAUSE_OPENER.test(m[2].trimStart()) || CLAUSE_OPENER.test(m[3].trimStart())) continue
+      if (endsWithProperNoun(m[1]) && !startsWithProperNoun(m[2])) continue  // named-entity appositive
       violations.push({ ruleId: 'triple-construction', startIndex: offset + m.index, endIndex: offset + m.index + m[0].length, matchedText: m[0] })
     }
 
     // "A, B and C" — no Oxford comma; B must be short (1–3 words) to avoid matching
     // clause-internal "and" like "you absorb morale damage and replacement costs"
+    // Guard: skip if B or C starts with a clause opener
     const noOxfordRe = /([^,\n]{3,70}),\s+([\w-]+(?:\s+[\w-]+){0,2})\s+(?:and|or)\s+([^,.!?\n]{3,70})/gi
     while ((m = noOxfordRe.exec(chunk)) !== null) {
+      if (CLAUSE_OPENER.test(m[2].trimStart()) || CLAUSE_OPENER.test(m[3].trimStart())) continue
       violations.push({ ruleId: 'triple-construction', startIndex: offset + m.index, endIndex: offset + m.index + m[0].length, matchedText: m[0] })
     }
   }
