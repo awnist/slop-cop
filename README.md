@@ -18,12 +18,12 @@ Detection runs in two tiers:
 
 **Client-side (instant):** 35 rules implemented as regex and structural analysis. Fire on every keystroke after a 350ms debounce. No API key needed.
 
-**Semantic (optional):** Two parallel calls to the Anthropic API, triggered manually:
+**Semantic (optional):** Two parallel calls to the selected LLM provider API (Anthropic or OpenAI), triggered manually:
 
 - *Fast pass* — Claude Haiku (~5s): sentence and paragraph-level patterns that require language understanding (triple construction, sycophantic framing, unnecessary elaboration, etc.). Large documents are automatically split into overlapping chunks and analyzed in parallel for better coverage.
 - *Deep pass* — Claude Sonnet (~15s): document-level patterns only visible at scale (dead metaphor repetition, one-point dilution, fractal summaries)
 
-API calls go directly from your browser to Anthropic. No server. Your key is stored in `localStorage` and never leaves your machine.
+API calls go directly from your browser to the provider you choose (Anthropic or OpenAI). No server. Your key is stored in `localStorage` and never leaves your machine.
 
 ## Patterns detected
 
@@ -69,11 +69,11 @@ API calls go directly from your browser to Anthropic. No server. Your key is sto
 | False Range               | Hollow `from X to Y` constructions; `doesn't emerge from nowhere`                                                     |
 
 
-### Semantic — fast pass (Claude Haiku)
+### Semantic — fast pass (Claude Haiku or GPT-4.5 mini)
 
 Triple Construction · Throat-Clearing Opener · Sycophantic Frame · Balanced Take · Unnecessary Elaboration · Empathy Performance · Pivot Paragraph · Grandiose Stakes · Historical Analogy Stack · False Vulnerability
 
-### Semantic — deep pass (Claude Sonnet)
+### Semantic — deep pass (Claude Sonnet or GPT-4.5)
 
 Dead Metaphor · One-Point Dilution · Fractal Summaries
 

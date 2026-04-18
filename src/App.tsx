@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react'
 import { RULES, RULES_BY_ID } from './rules'
 import type { Violation } from './types'
 import { runClientDetectors } from './detectors/index'
-import { runLLMDetectors, runDocumentDetectors, rewriteParagraph, buildRewriteSystemPrompt } from './detectors/llmDetectors'
+import { runLLMDetectors, runDocumentDetectors, rewriteParagraph, buildRewriteSystemPrompt, type LLMProvider } from './detectors/llmDetectors'
 import { buildHighlightedHTML } from './utils/buildHighlightedHTML'
 import Sidebar from './components/Sidebar'
 import Toolbar from './components/Toolbar'
@@ -13,6 +13,13 @@ import { SAMPLE_TEXT } from './data/sampleText'
 import SAMPLE_VIOLATIONS from './data/sampleViolations.json'
 
 const DEBOUNCE_MS = 350
+const LEGACY_ANTHROPIC_API_KEY_STORAGE = 'anthropic-api-key'
+const LLM_API_KEY_STORAGE = 'llm-api-key'
+const LLM_PROVIDER_STORAGE = 'llm-provider'
+
+function isLLMProvider(value: string | null): value is LLMProvider {
+  return value === 'anthropic' || value === 'openai'
+}
 
 export default function App() {
   const [text, setText] = useState(() => {
@@ -27,7 +34,16 @@ export default function App() {
     isDefaultText ? (SAMPLE_VIOLATIONS as Violation[]) : []
   )
   const [hiddenRules, setHiddenRules] = useState<Set<string>>(new Set())
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('anthropic-api-key') ?? '')
+  const [provider, setProvider] = useState<LLMProvider>(() => {
+    const stored = localStorage.getItem(LLM_PROVIDER_STORAGE)
+    if (isLLMProvider(stored)) return stored
+    return 'anthropic'
+  })
+  const [apiKey, setApiKey] = useState(() => (
+    localStorage.getItem(LLM_API_KEY_STORAGE)
+    ?? localStorage.getItem(LEGACY_ANTHROPIC_API_KEY_STORAGE)
+    ?? ''
+  ))
   const [llmStatus, setLlmStatus] = useState<'idle' | 'loading' | 'done' | 'stale' | 'error'>(
     isDefaultText ? 'done' : 'idle'
   )
@@ -281,17 +297,17 @@ export default function App() {
     }
 
     // Fragment call — Haiku, fast (~3–5s), sentence/paragraph patterns
-    runLLMDetectors(text, apiKey)
+    runLLMDetectors(text, apiKey, undefined, provider)
       .then(results => { collected.push(...results) })
       .catch(e => { errors.push(e instanceof Error ? e.message : String(e)) })
       .finally(oneDone)
 
     // Document call — Sonnet, slower (~8–15s), structural/compositional patterns
-    runDocumentDetectors(text, apiKey)
+    runDocumentDetectors(text, apiKey, undefined, provider)
       .then(results => { collected.push(...results) })
       .catch(e => { errors.push(e instanceof Error ? e.message : String(e)) })
       .finally(oneDone)
-  }, [apiKey, text])
+  }, [apiKey, provider, text])
 
   // Dim all text and non-matching marks when hovering a sidebar rule;
   // override color of matching marks to show only the hovered rule's color
@@ -506,13 +522,13 @@ export default function App() {
     setRewritePopover({ paraText, paraStart, paraEnd, buttonLeft, buttonTop, rewritten: null, error: null, loading: true, debugPrompt })
 
     try {
-      const result = await rewriteParagraph(paraText, ruleHints, apiKey)
+      const result = await rewriteParagraph(paraText, ruleHints, apiKey, provider)
       setRewritePopover(prev => prev ? { ...prev, rewritten: result, loading: false } : null)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setRewritePopover(prev => prev ? { ...prev, error: msg, loading: false } : null)
     }
-  }, [selectionRange, apiKey])
+  }, [selectionRange, apiKey, provider])
 
   const handleSparkleClick = useCallback(async () => {
     if (!hoveredPara) return
@@ -551,13 +567,13 @@ export default function App() {
     setHoveredPara(null)
 
     try {
-      const result = await rewriteParagraph(paraText, ruleHints, apiKey)
+      const result = await rewriteParagraph(paraText, ruleHints, apiKey, provider)
       setRewritePopover(prev => prev ? { ...prev, rewritten: result, loading: false } : null)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setRewritePopover(prev => prev ? { ...prev, error: msg, loading: false } : null)
     }
-  }, [hoveredPara, apiKey])
+  }, [hoveredPara, apiKey, provider])
 
   const applyRewrite = useCallback(() => {
     if (!rewritePopover || rewritePopover.rewritten === null) return
@@ -583,8 +599,20 @@ export default function App() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#f5f5f0' }}>
       <Toolbar
         apiKey={apiKey}
-        onApiKeyChange={key => { setApiKey(key); localStorage.setItem('anthropic-api-key', key) }}
-        onApiKeyRemove={() => { setApiKey(''); localStorage.removeItem('anthropic-api-key') }}
+        provider={provider}
+        onCredentialsSave={(nextProvider, key) => {
+          setProvider(nextProvider)
+          setApiKey(key)
+          localStorage.setItem(LLM_PROVIDER_STORAGE, nextProvider)
+          localStorage.setItem(LLM_API_KEY_STORAGE, key)
+          if (nextProvider === 'anthropic') localStorage.setItem(LEGACY_ANTHROPIC_API_KEY_STORAGE, key)
+          else localStorage.removeItem(LEGACY_ANTHROPIC_API_KEY_STORAGE)
+        }}
+        onApiKeyRemove={() => {
+          setApiKey('')
+          localStorage.removeItem(LLM_API_KEY_STORAGE)
+          localStorage.removeItem(LEGACY_ANTHROPIC_API_KEY_STORAGE)
+        }}
         onRunLLM={runLLM}
         llmStatus={llmStatus}
         stalePct={stalePct}
