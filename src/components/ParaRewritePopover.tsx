@@ -74,14 +74,14 @@ export default function ParaRewritePopover({ original, rewritten, error, debugPr
         {noApiKey ? (
           <div style={{ fontFamily: 'sans-serif' }}>
             <p style={{ fontSize: '13px', color: '#444', margin: '0 0 12px', lineHeight: '1.5' }}>
-              <mark style={{ background: '#fef08a', borderRadius: '2px', padding: '0 2px' }}>Enter an Anthropic API key in the toolbar</mark> to enable AI features:
+              <mark style={{ background: '#fef08a', borderRadius: '2px', padding: '0 2px' }}>Enter an Anthropic or OpenAI API key in the toolbar</mark> to enable AI features:
             </p>
             <ul style={{ margin: '0 0 12px', padding: '0 0 0 16px', fontSize: '12px', color: '#555', lineHeight: '1.8' }}>
               <li><strong>Paragraph rewrite</strong> — rewrites a paragraph to remove detected patterns</li>
               <li><strong>Semantic analysis</strong> — detects 13 additional LLM patterns that require language understanding</li>
             </ul>
             <p style={{ fontSize: '11px', color: '#999', margin: 0, lineHeight: '1.5' }}>
-              Your key is stored only in your browser. Requests go directly from your browser to Anthropic's API — nothing passes through any server of ours.
+              Your key is stored only in your browser. Requests go directly from your browser to the provider you choose — nothing passes through any server of ours.
             </p>
           </div>
         ) : showDebug ? (

@@ -1,6 +1,8 @@
 import type { Violation } from '../types'
 import { RULES } from '../rules'
 
+export type LLMProvider = 'anthropic' | 'openai'
+
 const SYSTEM_PROMPT = `You are an expert editor analyzing text for LLM-generated prose patterns.
 You will be given a passage and asked to identify specific rhetorical and structural tells.
 Be conservative — only flag clear, unambiguous instances.`
@@ -13,7 +15,7 @@ function buildLLMRulesPrompt(): string {
   return `Identify these patterns:\n\n${numbered}\n\nFor suggestedChange: rewrite only the matched span. Make it direct and concrete.`
 }
 
-// ── Document-level prompt (Sonnet) ───────────────────────────────────────────
+// ── Document-level prompt (Sonnet / GPT-4.5) ────────────────────────────────
 
 const DOCUMENT_SYSTEM_PROMPT = `You are an experienced editor reading a complete piece of writing to identify structural and compositional problems that only become visible at document scale — patterns that emerge across paragraphs rather than within a single sentence.
 Be conservative — only flag clear, unambiguous cases.`
@@ -26,7 +28,7 @@ function buildDocumentRulesPrompt(): string {
   return `Read the entire piece as an editor. Identify these document-level patterns:\n\n${numbered}\n\nReturn only clear cases. If the piece is short, tight, or well-structured, return [].`
 }
 
-// ── Shared types and helpers ──────────────────────────────────────────────────
+// ── Shared types and helpers ─────────────────────────────────────────────────
 
 interface LLMResult {
   ruleId: string
@@ -84,7 +86,6 @@ function processViolations(text: string, items: LLMResult[]): Violation[] {
   return violations
 }
 
-
 // ── Shared violation tool schema ─────────────────────────────────────────────
 
 const VIOLATION_TOOL_NAME = 'submit_violations'
@@ -97,9 +98,9 @@ const VIOLATION_TOOL_SCHEMA = {
       items: {
         type: 'object',
         properties: {
-          ruleId:        { type: 'string', description: 'The rule ID being violated.' },
-          matchedText:   { type: 'string', description: 'The EXACT substring from the text, character-for-character.' },
-          explanation:   { type: 'string', description: 'One sentence explaining why this is a violation.' },
+          ruleId: { type: 'string', description: 'The rule ID being violated.' },
+          matchedText: { type: 'string', description: 'The EXACT substring from the text, character-for-character.' },
+          explanation: { type: 'string', description: 'One sentence explaining why this is a violation.' },
           suggestedChange: { type: 'string', description: 'Literal replacement text inserted verbatim, or "" to delete. Never write instructions.' },
         },
         required: ['ruleId', 'matchedText', 'explanation', 'suggestedChange'],
@@ -109,7 +110,32 @@ const VIOLATION_TOOL_SCHEMA = {
   required: ['violations'],
 }
 
+function sentenceModelFor(provider: LLMProvider): string {
+  return provider === 'openai' ? 'gpt-4.1-mini' : 'claude-haiku-4-5-20251001'
+}
+
+function documentModelFor(provider: LLMProvider): string {
+  return provider === 'openai' ? 'gpt-4.1' : 'claude-sonnet-4-6'
+}
+
+function rewriteModelFor(provider: LLMProvider): string {
+  return provider === 'openai' ? 'gpt-4.1-mini' : 'claude-haiku-4-5-20251001'
+}
+
+function sentenceProgressFor(provider: LLMProvider): string {
+  return provider === 'openai'
+    ? 'Analyzing with OpenAI GPT-4.1 mini (sentence patterns)...'
+    : 'Analyzing with Claude Haiku (sentence patterns)...'
+}
+
+function documentProgressFor(provider: LLMProvider): string {
+  return provider === 'openai'
+    ? 'Analyzing with OpenAI GPT-4.1 (document structure)...'
+    : 'Analyzing with Claude Sonnet (document structure)...'
+}
+
 async function callViolationDetector(
+  provider: LLMProvider,
   apiKey: string,
   model: string,
   systemPrompt: string,
@@ -117,7 +143,8 @@ async function callViolationDetector(
   fullText: string,
   timeoutMs: number,
 ): Promise<Violation[]> {
-  const result = await callAnthropicTool<{ violations: LLMResult[] }>(
+  const result = await callProviderTool<{ violations: LLMResult[] }>(
+    provider,
     apiKey, model, systemPrompt, userContent,
     VIOLATION_TOOL_NAME, VIOLATION_TOOL_DESCRIPTION, VIOLATION_TOOL_SCHEMA,
     timeoutMs,
@@ -126,9 +153,10 @@ async function callViolationDetector(
 }
 
 // ── Chunking for large documents ─────────────────────────────────────────────
-// Haiku misses patterns when given very long texts. Above CHUNK_THRESHOLD we
-// split on paragraph boundaries, run chunks in parallel, then merge results.
-// processViolations always receives the full text so indexOf finds correct offsets.
+// Haiku / GPT-4.5 mini miss patterns when given very long texts. Above
+// CHUNK_THRESHOLD we split on paragraph boundaries, run chunks in parallel,
+// then merge results. processViolations always receives the full text so
+// indexOf finds correct offsets.
 
 const CHUNK_THRESHOLD = 4000 // chars; below this, single call
 const CHUNK_SIZE = 3500      // target chars per chunk
@@ -164,27 +192,36 @@ function deduplicateViolations(violations: Violation[]): Violation[] {
   })
 }
 
-// Fragment-level patterns — fast, uses Haiku
+// Fragment-level patterns — fast, uses Haiku / GPT-4.5 mini
 export async function runLLMDetectors(
   text: string,
   apiKey: string,
   onProgress?: (msg: string) => void,
+  provider: LLMProvider = 'anthropic',
 ): Promise<Violation[]> {
-  onProgress?.('Analyzing with Claude Haiku (sentence patterns)...')
+  onProgress?.(sentenceProgressFor(provider))
   const chunks = chunkText(text)
   if (chunks.length === 1) {
     return callViolationDetector(
-      apiKey, 'claude-haiku-4-5-20251001', SYSTEM_PROMPT,
+      provider,
+      apiKey,
+      sentenceModelFor(provider),
+      SYSTEM_PROMPT,
       `${buildLLMRulesPrompt()}\n\nText to analyze:\n\n${text}`,
-      text, 30_000,
+      text,
+      30_000,
     )
   }
   const results = await Promise.all(
     chunks.map(chunk =>
       callViolationDetector(
-        apiKey, 'claude-haiku-4-5-20251001', SYSTEM_PROMPT,
+        provider,
+        apiKey,
+        sentenceModelFor(provider),
+        SYSTEM_PROMPT,
         `${buildLLMRulesPrompt()}\n\nText to analyze:\n\n${chunk}`,
-        text, 30_000,
+        text,
+        30_000,
       ).catch(() => [] as Violation[])
     )
   )
@@ -228,6 +265,42 @@ export function buildRewriteSystemPrompt(violatedRuleHints: string[]): string {
   return `You are an expert editor. Rewrite the given text to read like natural, direct human prose. Apply all of these principles:\n${buildDefaultPrinciples()}${ruleSection}`
 }
 
+async function callProviderTool<T>(
+  provider: LLMProvider,
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userContent: string,
+  toolName: string,
+  toolDescription: string,
+  inputSchema: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<T> {
+  if (provider === 'openai') {
+    return callOpenAITool<T>(
+      apiKey,
+      model,
+      systemPrompt,
+      userContent,
+      toolName,
+      toolDescription,
+      inputSchema,
+      timeoutMs,
+    )
+  }
+
+  return callAnthropicTool<T>(
+    apiKey,
+    model,
+    systemPrompt,
+    userContent,
+    toolName,
+    toolDescription,
+    inputSchema,
+    timeoutMs,
+  )
+}
+
 async function callAnthropicTool<T>(
   apiKey: string,
   model: string,
@@ -266,6 +339,7 @@ async function callAnthropicTool<T>(
   } finally {
     clearTimeout(timer)
   }
+
   if (!response.ok) {
     let detail = ''
     try { detail = await response.text() } catch { /* ignore */ }
@@ -273,20 +347,107 @@ async function callAnthropicTool<T>(
     if (response.status === 429) throw new Error('Rate limited (429). Wait a moment and try again.')
     throw new Error(`Anthropic API ${response.status}: ${detail.slice(0, 200)}`)
   }
+
   const data = await response.json() as { content: Array<{ type: string; name?: string; input?: unknown }> }
   const toolBlock = data.content.find(b => b.type === 'tool_use' && b.name === toolName)
   if (!toolBlock?.input) throw new Error('No tool response from model.')
   return toolBlock.input as T
 }
 
+async function callOpenAITool<T>(
+  apiKey: string,
+  model: string,
+  systemPrompt: string,
+  userContent: string,
+  toolName: string,
+  toolDescription: string,
+  inputSchema: Record<string, unknown>,
+  timeoutMs: number,
+): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  let response: Response
+  try {
+    response = await fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      signal: controller.signal,
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0,
+        max_completion_tokens: 4096,
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userContent },
+        ],
+        tools: [{
+          type: 'function',
+          function: {
+            name: toolName,
+            description: toolDescription,
+            parameters: inputSchema,
+          },
+        }],
+        tool_choice: {
+          type: 'function',
+          function: { name: toolName },
+        },
+      }),
+    })
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'AbortError') throw new Error(`Request timed out after ${timeoutMs / 1000}s.`)
+    throw new Error('Network error — could not reach api.openai.com.')
+  } finally {
+    clearTimeout(timer)
+  }
+
+  if (!response.ok) {
+    let detail = ''
+    try { detail = await response.text() } catch { /* ignore */ }
+    if (response.status === 401) throw new Error(`Invalid API key (401): ${detail}`)
+    if (response.status === 429) throw new Error('Rate limited (429). Wait a moment and try again.')
+    throw new Error(`OpenAI API ${response.status}: ${detail.slice(0, 200)}`)
+  }
+
+  const data = await response.json() as {
+    choices?: Array<{
+      message?: {
+        tool_calls?: Array<{
+          function?: {
+            name?: string
+            arguments?: string
+          }
+        }>
+      }
+    }>
+  }
+
+  const args = data.choices?.[0]?.message?.tool_calls?.find(
+    call => call.function?.name === toolName,
+  )?.function?.arguments
+
+  if (!args) throw new Error('No tool response from model.')
+
+  try {
+    return JSON.parse(args) as T
+  } catch {
+    throw new Error('OpenAI returned invalid tool arguments JSON.')
+  }
+}
+
 export async function rewriteParagraph(
   paragraph: string,
   violatedRuleHints: string[],
   apiKey: string,
+  provider: LLMProvider = 'anthropic',
 ): Promise<string> {
-  const result = await callAnthropicTool<{ rewritten: string }>(
+  const result = await callProviderTool<{ rewritten: string }>(
+    provider,
     apiKey,
-    'claude-haiku-4-5-20251001',
+    rewriteModelFor(provider),
     buildRewriteSystemPrompt(violatedRuleHints),
     paragraph,
     'submit_rewrite',
@@ -303,16 +464,21 @@ export async function rewriteParagraph(
   return result.rewritten.trim()
 }
 
-// Document-level patterns — deeper, uses Sonnet
+// Document-level patterns — deeper, uses Sonnet / GPT-4.5
 export async function runDocumentDetectors(
   text: string,
   apiKey: string,
   onProgress?: (msg: string) => void,
+  provider: LLMProvider = 'anthropic',
 ): Promise<Violation[]> {
-  onProgress?.('Analyzing with Claude Sonnet (document structure)...')
+  onProgress?.(documentProgressFor(provider))
   return callViolationDetector(
-    apiKey, 'claude-sonnet-4-6', DOCUMENT_SYSTEM_PROMPT,
+    provider,
+    apiKey,
+    documentModelFor(provider),
+    DOCUMENT_SYSTEM_PROMPT,
     `${buildDocumentRulesPrompt()}\n\nFull text:\n\n${text}`,
-    text, 60_000,
+    text,
+    60_000,
   )
 }

@@ -1,6 +1,6 @@
 export const SAMPLE_TEXT = `Slop Cop is a writing editor that flags the rhetorical and structural patterns often found in generic LLM prose, then highlights them in real time for revision.
 
-It runs entirely in the browser, and you can optionally add an Anthropic API key to run deeper analysis and enable auto-edits.
+It runs entirely in the browser, and you can optionally add an Anthropic or OpenAI API key to run deeper analysis and enable auto-edits.
 
 Here's an example:
 
