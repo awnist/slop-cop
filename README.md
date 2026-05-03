@@ -18,12 +18,12 @@ Detection runs in two tiers:
 
 **Client-side (instant):** 36 rules implemented as regex and structural analysis. Fire on every keystroke after a 350ms debounce. No API key needed.
 
-**Semantic (optional):** Two parallel calls to the selected LLM provider API (Anthropic or OpenAI), triggered manually:
+**Semantic (optional):** Two parallel calls to the configured LLM (Anthropic, OpenAI, or a local model), triggered manually:
 
 - *Fast pass* — Claude Haiku (~5s): sentence and paragraph-level patterns that require language understanding (sycophantic framing, unnecessary elaboration, etc.). Large documents are automatically split into overlapping chunks and analyzed in parallel for better coverage.
 - *Deep pass* — Claude Sonnet (~15s): document-level patterns only visible at scale (dead metaphor repetition, one-point dilution, fractal summaries)
 
-API calls go directly from your browser to the provider you choose (Anthropic or OpenAI). No server. Your key is stored in `localStorage` and never leaves your machine.
+API calls go directly from your browser to the provider you choose (Anthropic, OpenAI, or a local server). No server on our end. Your key is stored in `localStorage` and never leaves your machine.
 
 ## Patterns detected
 
@@ -70,11 +70,11 @@ API calls go directly from your browser to the provider you choose (Anthropic or
 | Triple Construction       | Exactly three parallel items: `X, Y, and Z` — the LLM default                                                        |
 
 
-### Semantic — fast pass (Claude Haiku or GPT-4.5 mini)
+### Semantic — fast pass (Claude Haiku or GPT-4.1 mini)
 
 Throat-Clearing Opener · Sycophantic Frame · Balanced Take · Unnecessary Elaboration · Empathy Performance · Pivot Paragraph · Grandiose Stakes · Historical Analogy Stack · False Vulnerability
 
-### Semantic — deep pass (Claude Sonnet or GPT-4.5)
+### Semantic — deep pass (Claude Sonnet or GPT-4.1)
 
 Dead Metaphor · One-Point Dilution · Fractal Summaries
 

@@ -74,7 +74,7 @@ export default function ParaRewritePopover({ original, rewritten, error, debugPr
         {noApiKey ? (
           <div style={{ fontFamily: 'sans-serif' }}>
             <p style={{ fontSize: '13px', color: '#444', margin: '0 0 12px', lineHeight: '1.5' }}>
-              <mark style={{ background: '#fef08a', borderRadius: '2px', padding: '0 2px' }}>Enter an Anthropic or OpenAI API key in the toolbar</mark> to enable AI features:
+              <mark style={{ background: '#fef08a', borderRadius: '2px', padding: '0 2px' }}>Configure an API key or local model in the toolbar</mark> to enable AI features:
             </p>
             <ul style={{ margin: '0 0 12px', padding: '0 0 0 16px', fontSize: '12px', color: '#555', lineHeight: '1.8' }}>
               <li><strong>Paragraph rewrite</strong> — rewrites a paragraph to remove detected patterns</li>

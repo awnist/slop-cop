@@ -187,7 +187,7 @@ export default function Sidebar({ violations, hiddenRules, onToggleRule, onRuleH
             fontFamily: 'sans-serif',
             lineHeight: '1.5',
           }}>
-            Add an Anthropic or OpenAI API key to unlock semantic pattern detection (Triple Construction, Throat-Clearing, Sycophantic Frame, and more).
+            Add an Anthropic or OpenAI API key, or configure a local model, to unlock semantic pattern detection (Triple Construction, Throat-Clearing, Sycophantic Frame, and more).
           </div>
         )}
 

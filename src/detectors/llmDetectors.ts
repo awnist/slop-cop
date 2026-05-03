@@ -1,7 +1,12 @@
 import type { Violation } from '../types'
 import { RULES } from '../rules'
 
-export type LLMProvider = 'anthropic' | 'openai'
+export type LLMProvider = 'anthropic' | 'openai' | 'local'
+
+export interface LocalConfig {
+  baseUrl: string
+  model: string
+}
 
 const SYSTEM_PROMPT = `You are an expert editor analyzing text for LLM-generated prose patterns.
 You will be given a passage and asked to identify specific rhetorical and structural tells.
@@ -110,25 +115,30 @@ const VIOLATION_TOOL_SCHEMA = {
   required: ['violations'],
 }
 
-function sentenceModelFor(provider: LLMProvider): string {
+function sentenceModelFor(provider: LLMProvider, localConfig?: LocalConfig): string {
+  if (provider === 'local') return localConfig?.model ?? 'llama3.1'
   return provider === 'openai' ? 'gpt-4.1-mini' : 'claude-haiku-4-5-20251001'
 }
 
-function documentModelFor(provider: LLMProvider): string {
+function documentModelFor(provider: LLMProvider, localConfig?: LocalConfig): string {
+  if (provider === 'local') return localConfig?.model ?? 'llama3.1'
   return provider === 'openai' ? 'gpt-4.1' : 'claude-sonnet-4-6'
 }
 
-function rewriteModelFor(provider: LLMProvider): string {
+function rewriteModelFor(provider: LLMProvider, localConfig?: LocalConfig): string {
+  if (provider === 'local') return localConfig?.model ?? 'llama3.1'
   return provider === 'openai' ? 'gpt-4.1-mini' : 'claude-haiku-4-5-20251001'
 }
 
-function sentenceProgressFor(provider: LLMProvider): string {
+function sentenceProgressFor(provider: LLMProvider, localConfig?: LocalConfig): string {
+  if (provider === 'local') return `Analyzing with ${localConfig?.model ?? 'local model'} (sentence patterns)...`
   return provider === 'openai'
     ? 'Analyzing with OpenAI GPT-4.1 mini (sentence patterns)...'
     : 'Analyzing with Claude Haiku (sentence patterns)...'
 }
 
-function documentProgressFor(provider: LLMProvider): string {
+function documentProgressFor(provider: LLMProvider, localConfig?: LocalConfig): string {
+  if (provider === 'local') return `Analyzing with ${localConfig?.model ?? 'local model'} (document structure)...`
   return provider === 'openai'
     ? 'Analyzing with OpenAI GPT-4.1 (document structure)...'
     : 'Analyzing with Claude Sonnet (document structure)...'
@@ -142,12 +152,14 @@ async function callViolationDetector(
   userContent: string,
   fullText: string,
   timeoutMs: number,
+  localConfig?: LocalConfig,
 ): Promise<Violation[]> {
   const result = await callProviderTool<{ violations: LLMResult[] }>(
     provider,
     apiKey, model, systemPrompt, userContent,
     VIOLATION_TOOL_NAME, VIOLATION_TOOL_DESCRIPTION, VIOLATION_TOOL_SCHEMA,
     timeoutMs,
+    localConfig,
   )
   return processViolations(fullText, result.violations ?? [])
 }
@@ -192,24 +204,27 @@ function deduplicateViolations(violations: Violation[]): Violation[] {
   })
 }
 
-// Fragment-level patterns — fast, uses Haiku / GPT-4.5 mini
+// Fragment-level patterns — fast, uses Haiku / GPT-4.1 mini / local
 export async function runLLMDetectors(
   text: string,
   apiKey: string,
   onProgress?: (msg: string) => void,
   provider: LLMProvider = 'anthropic',
+  localConfig?: LocalConfig,
 ): Promise<Violation[]> {
-  onProgress?.(sentenceProgressFor(provider))
+  onProgress?.(sentenceProgressFor(provider, localConfig))
   const chunks = chunkText(text)
+  const sentenceTimeout = provider === 'local' ? 0 : 30_000
   if (chunks.length === 1) {
     return callViolationDetector(
       provider,
       apiKey,
-      sentenceModelFor(provider),
+      sentenceModelFor(provider, localConfig),
       SYSTEM_PROMPT,
       `${buildLLMRulesPrompt()}\n\nText to analyze:\n\n${text}`,
       text,
-      30_000,
+      sentenceTimeout,
+      localConfig,
     )
   }
   const results = await Promise.all(
@@ -217,11 +232,12 @@ export async function runLLMDetectors(
       callViolationDetector(
         provider,
         apiKey,
-        sentenceModelFor(provider),
+        sentenceModelFor(provider, localConfig),
         SYSTEM_PROMPT,
         `${buildLLMRulesPrompt()}\n\nText to analyze:\n\n${chunk}`,
         text,
-        30_000,
+        sentenceTimeout,
+        localConfig,
       ).catch(() => [] as Violation[])
     )
   )
@@ -274,29 +290,27 @@ async function callProviderTool<T>(
   toolDescription: string,
   inputSchema: Record<string, unknown>,
   timeoutMs: number,
+  localConfig?: LocalConfig,
 ): Promise<T> {
   if (provider === 'openai') {
     return callOpenAITool<T>(
-      apiKey,
-      model,
-      systemPrompt,
-      userContent,
-      toolName,
-      toolDescription,
-      inputSchema,
-      timeoutMs,
+      apiKey, model, systemPrompt, userContent,
+      toolName, toolDescription, inputSchema, timeoutMs,
+    )
+  }
+
+  if (provider === 'local') {
+    const baseUrl = (localConfig?.baseUrl ?? 'http://localhost:11434/v1').replace(/\/$/, '')
+    return callOpenAITool<T>(
+      apiKey || 'local', model, systemPrompt, userContent,
+      toolName, toolDescription, inputSchema, timeoutMs,
+      baseUrl, false,
     )
   }
 
   return callAnthropicTool<T>(
-    apiKey,
-    model,
-    systemPrompt,
-    userContent,
-    toolName,
-    toolDescription,
-    inputSchema,
-    timeoutMs,
+    apiKey, model, systemPrompt, userContent,
+    toolName, toolDescription, inputSchema, timeoutMs,
   )
 }
 
@@ -362,14 +376,17 @@ async function callOpenAITool<T>(
   toolDescription: string,
   inputSchema: Record<string, unknown>,
   timeoutMs: number,
+  baseUrl = 'https://api.openai.com/v1',
+  forceToolChoice = true,
 ): Promise<T> {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  const isLocal = baseUrl !== 'https://api.openai.com/v1'
+  const controller = timeoutMs > 0 ? new AbortController() : null
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null
   let response: Response
   try {
-    response = await fetch('https://api.openai.com/v1/chat/completions', {
+    response = await fetch(`${baseUrl}/chat/completions`, {
       method: 'POST',
-      signal: controller.signal,
+      ...(controller ? { signal: controller.signal } : {}),
       headers: {
         'Authorization': `Bearer ${apiKey}`,
         'content-type': 'application/json',
@@ -377,7 +394,8 @@ async function callOpenAITool<T>(
       body: JSON.stringify({
         model,
         temperature: 0,
-        max_completion_tokens: 4096,
+        // Ollama uses max_tokens; OpenAI accepts max_completion_tokens
+        ...(isLocal ? { max_tokens: 4096 } : { max_completion_tokens: 4096 }),
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userContent },
@@ -390,17 +408,20 @@ async function callOpenAITool<T>(
             parameters: inputSchema,
           },
         }],
-        tool_choice: {
-          type: 'function',
-          function: { name: toolName },
-        },
+        // Ollama does not support tool_choice forcing — omit it for local.
+        // Use response_format json_object so models without tool-call support
+        // still return parseable JSON (Ollama structured outputs).
+        ...(forceToolChoice
+          ? { tool_choice: { type: 'function', function: { name: toolName } } }
+          : { response_format: { type: 'json_object' } }),
       }),
     })
   } catch (err) {
     if (err instanceof DOMException && err.name === 'AbortError') throw new Error(`Request timed out after ${timeoutMs / 1000}s.`)
-    throw new Error('Network error — could not reach api.openai.com.')
+    const host = new URL(baseUrl).host
+    throw new Error(`Network error — could not reach ${host}.`)
   } finally {
-    clearTimeout(timer)
+    if (timer) clearTimeout(timer)
   }
 
   if (!response.ok) {
@@ -408,12 +429,17 @@ async function callOpenAITool<T>(
     try { detail = await response.text() } catch { /* ignore */ }
     if (response.status === 401) throw new Error(`Invalid API key (401): ${detail}`)
     if (response.status === 429) throw new Error('Rate limited (429). Wait a moment and try again.')
-    throw new Error(`OpenAI API ${response.status}: ${detail.slice(0, 200)}`)
+    if (isLocal && response.status === 400 && detail.includes('does not support tools')) {
+      throw new Error(`This model doesn't support tool calling. Switch to a compatible model: llama3.1, mistral-nemo, qwen2.5, etc.`)
+    }
+    const label = isLocal ? 'Local model' : 'OpenAI'
+    throw new Error(`${label} API ${response.status}: ${detail.slice(0, 200)}`)
   }
 
   const data = await response.json() as {
     choices?: Array<{
       message?: {
+        content?: string | null
         tool_calls?: Array<{
           function?: {
             name?: string
@@ -428,13 +454,29 @@ async function callOpenAITool<T>(
     call => call.function?.name === toolName,
   )?.function?.arguments
 
-  if (!args) throw new Error('No tool response from model.')
-
-  try {
-    return JSON.parse(args) as T
-  } catch {
-    throw new Error('OpenAI returned invalid tool arguments JSON.')
+  if (args) {
+    try {
+      return JSON.parse(args) as T
+    } catch {
+      throw new Error('Model returned invalid tool arguments JSON.')
+    }
   }
+
+  // Local models sometimes respond with plain JSON text instead of a tool call
+  if (isLocal) {
+    const content = data.choices?.[0]?.message?.content
+    if (content) {
+      const match = content.match(/\{[\s\S]*\}/)
+      if (match) {
+        try {
+          return JSON.parse(match[0]) as T
+        } catch { /* fall through to error */ }
+      }
+    }
+    throw new Error('Local model did not use the tool. Try a model with tool-calling support (llama3.1, mistral-nemo, etc.).')
+  }
+
+  throw new Error('No tool response from model.')
 }
 
 export async function rewriteParagraph(
@@ -442,11 +484,12 @@ export async function rewriteParagraph(
   violatedRuleHints: string[],
   apiKey: string,
   provider: LLMProvider = 'anthropic',
+  localConfig?: LocalConfig,
 ): Promise<string> {
   const result = await callProviderTool<{ rewritten: string }>(
     provider,
     apiKey,
-    rewriteModelFor(provider),
+    rewriteModelFor(provider, localConfig),
     buildRewriteSystemPrompt(violatedRuleHints),
     paragraph,
     'submit_rewrite',
@@ -458,26 +501,29 @@ export async function rewriteParagraph(
       },
       required: ['rewritten'],
     },
-    20_000,
+    provider === 'local' ? 0 : 20_000,
+    localConfig,
   )
   return result.rewritten.trim()
 }
 
-// Document-level patterns — deeper, uses Sonnet / GPT-4.5
+// Document-level patterns — deeper, uses Sonnet / GPT-4.1 / local
 export async function runDocumentDetectors(
   text: string,
   apiKey: string,
   onProgress?: (msg: string) => void,
   provider: LLMProvider = 'anthropic',
+  localConfig?: LocalConfig,
 ): Promise<Violation[]> {
-  onProgress?.(documentProgressFor(provider))
+  onProgress?.(documentProgressFor(provider, localConfig))
   return callViolationDetector(
     provider,
     apiKey,
-    documentModelFor(provider),
+    documentModelFor(provider, localConfig),
     DOCUMENT_SYSTEM_PROMPT,
     `${buildDocumentRulesPrompt()}\n\nFull text:\n\n${text}`,
     text,
-    60_000,
+    provider === 'local' ? 0 : 60_000,
+    localConfig,
   )
 }

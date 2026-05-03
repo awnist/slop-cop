@@ -2,7 +2,7 @@ import { useState, useCallback, useEffect, useLayoutEffect, useRef, useMemo } fr
 import { RULES, RULES_BY_ID } from './rules'
 import type { Violation } from './types'
 import { runClientDetectors } from './detectors/index'
-import { runLLMDetectors, runDocumentDetectors, rewriteParagraph, buildRewriteSystemPrompt, type LLMProvider } from './detectors/llmDetectors'
+import { runLLMDetectors, runDocumentDetectors, rewriteParagraph, buildRewriteSystemPrompt, type LLMProvider, type LocalConfig } from './detectors/llmDetectors'
 import { buildHighlightedHTML } from './utils/buildHighlightedHTML'
 import Sidebar from './components/Sidebar'
 import Toolbar from './components/Toolbar'
@@ -16,9 +16,10 @@ const DEBOUNCE_MS = 350
 const LEGACY_ANTHROPIC_API_KEY_STORAGE = 'anthropic-api-key'
 const LLM_API_KEY_STORAGE = 'llm-api-key'
 const LLM_PROVIDER_STORAGE = 'llm-provider'
+const LLM_LOCAL_CONFIG_STORAGE = 'llm-local-config'
 
 function isLLMProvider(value: string | null): value is LLMProvider {
-  return value === 'anthropic' || value === 'openai'
+  return value === 'anthropic' || value === 'openai' || value === 'local'
 }
 
 export default function App() {
@@ -44,6 +45,11 @@ export default function App() {
     ?? localStorage.getItem(LEGACY_ANTHROPIC_API_KEY_STORAGE)
     ?? ''
   ))
+  const [localConfig, setLocalConfig] = useState<LocalConfig | null>(() => {
+    const stored = localStorage.getItem(LLM_LOCAL_CONFIG_STORAGE)
+    if (!stored) return null
+    try { return JSON.parse(stored) as LocalConfig } catch { return null }
+  })
   const [llmStatus, setLlmStatus] = useState<'idle' | 'loading' | 'done' | 'stale' | 'error'>(
     isDefaultText ? 'done' : 'idle'
   )
@@ -304,17 +310,17 @@ export default function App() {
     }
 
     // Fragment call — Haiku, fast (~3–5s), sentence/paragraph patterns
-    runLLMDetectors(text, apiKey, undefined, provider)
+    runLLMDetectors(text, apiKey, undefined, provider, localConfig ?? undefined)
       .then(results => { collected.push(...results) })
       .catch(e => { errors.push(e instanceof Error ? e.message : String(e)) })
       .finally(oneDone)
 
     // Document call — Sonnet, slower (~8–15s), structural/compositional patterns
-    runDocumentDetectors(text, apiKey, undefined, provider)
+    runDocumentDetectors(text, apiKey, undefined, provider, localConfig ?? undefined)
       .then(results => { collected.push(...results) })
       .catch(e => { errors.push(e instanceof Error ? e.message : String(e)) })
       .finally(oneDone)
-  }, [apiKey, provider, text])
+  }, [apiKey, localConfig, provider, text])
 
   // Dim all text and non-matching marks when hovering a sidebar rule;
   // override color of matching marks to show only the hovered rule's color
@@ -559,13 +565,13 @@ export default function App() {
     setRewritePopover({ paraText, paraStart, paraEnd, buttonLeft: buttonLeftViewport, buttonTop, rewritten: null, error: null, loading: true, debugPrompt })
 
     try {
-      const result = await rewriteParagraph(paraText, ruleHints, apiKey, provider)
+      const result = await rewriteParagraph(paraText, ruleHints, apiKey, provider, localConfig ?? undefined)
       setRewritePopover(prev => prev ? { ...prev, rewritten: result, loading: false } : null)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setRewritePopover(prev => prev ? { ...prev, error: msg, loading: false } : null)
     }
-  }, [selectionRange, apiKey, provider])
+  }, [selectionRange, apiKey, localConfig, provider])
 
   const handleSparkleClick = useCallback(async () => {
     if (!hoveredPara) return
@@ -610,13 +616,13 @@ export default function App() {
     setHoveredPara(null)
 
     try {
-      const result = await rewriteParagraph(paraText, ruleHints, apiKey, provider)
+      const result = await rewriteParagraph(paraText, ruleHints, apiKey, provider, localConfig ?? undefined)
       setRewritePopover(prev => prev ? { ...prev, rewritten: result, loading: false } : null)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setRewritePopover(prev => prev ? { ...prev, error: msg, loading: false } : null)
     }
-  }, [hoveredPara, apiKey, provider])
+  }, [hoveredPara, apiKey, localConfig, provider])
 
   const applyRewrite = useCallback(() => {
     if (!rewritePopover || rewritePopover.rewritten === null) return
@@ -643,18 +649,33 @@ export default function App() {
       <Toolbar
         apiKey={apiKey}
         provider={provider}
-        onCredentialsSave={(nextProvider, key) => {
+        localConfig={localConfig}
+        onCredentialsSave={(nextProvider, key, nextLocalConfig) => {
           setProvider(nextProvider)
-          setApiKey(key)
           localStorage.setItem(LLM_PROVIDER_STORAGE, nextProvider)
-          localStorage.setItem(LLM_API_KEY_STORAGE, key)
-          if (nextProvider === 'anthropic') localStorage.setItem(LEGACY_ANTHROPIC_API_KEY_STORAGE, key)
-          else localStorage.removeItem(LEGACY_ANTHROPIC_API_KEY_STORAGE)
+          if (nextProvider === 'local') {
+            setApiKey(key || 'local')
+            setLocalConfig(nextLocalConfig ?? null)
+            localStorage.removeItem(LLM_API_KEY_STORAGE)
+            localStorage.removeItem(LEGACY_ANTHROPIC_API_KEY_STORAGE)
+            if (nextLocalConfig) localStorage.setItem(LLM_LOCAL_CONFIG_STORAGE, JSON.stringify(nextLocalConfig))
+          } else {
+            setApiKey(key)
+            setLocalConfig(null)
+            localStorage.setItem(LLM_API_KEY_STORAGE, key)
+            if (nextProvider === 'anthropic') localStorage.setItem(LEGACY_ANTHROPIC_API_KEY_STORAGE, key)
+            else localStorage.removeItem(LEGACY_ANTHROPIC_API_KEY_STORAGE)
+            localStorage.removeItem(LLM_LOCAL_CONFIG_STORAGE)
+          }
         }}
         onApiKeyRemove={() => {
           setApiKey('')
+          setProvider('anthropic')
+          setLocalConfig(null)
           localStorage.removeItem(LLM_API_KEY_STORAGE)
+          localStorage.removeItem(LLM_PROVIDER_STORAGE)
           localStorage.removeItem(LEGACY_ANTHROPIC_API_KEY_STORAGE)
+          localStorage.removeItem(LLM_LOCAL_CONFIG_STORAGE)
         }}
         onRunLLM={runLLM}
         llmStatus={llmStatus}
