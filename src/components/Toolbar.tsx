@@ -1,14 +1,28 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import logoUrl from '/logo-sm.png'
+import type { LLMProvider } from '../detectors/llmDetectors'
 
 interface Props {
+  provider: LLMProvider
   apiKey: string
-  onApiKeyChange: (key: string) => void
+  onCredentialsSave: (provider: LLMProvider, key: string) => void
   onApiKeyRemove: () => void
   onRunLLM: () => void
   llmStatus: 'idle' | 'loading' | 'done' | 'stale' | 'error'
   stalePct: number
+}
+
+function providerLabel(provider: LLMProvider): string {
+  return provider === 'openai' ? 'OpenAI' : 'Anthropic'
+}
+
+function providerHost(provider: LLMProvider): string {
+  return provider === 'openai' ? 'api.openai.com' : 'api.anthropic.com'
+}
+
+function keyPlaceholder(provider: LLMProvider): string {
+  return provider === 'openai' ? 'sk-proj-… / sk-…' : 'sk-ant-…'
 }
 
 function usePopover() {
@@ -83,15 +97,22 @@ function PopoverBox({ popoverRef, btnRef, children }: {
 }
 
 export default function Toolbar({
-  apiKey, onApiKeyChange, onApiKeyRemove, onRunLLM, llmStatus, stalePct,
+  provider, apiKey, onCredentialsSave, onApiKeyRemove, onRunLLM, llmStatus, stalePct,
 }: Props) {
   const [showKeyInput, setShowKeyInput] = useState(false)
   const [keyDraft, setKeyDraft] = useState('')
+  const [providerDraft, setProviderDraft] = useState<LLMProvider>(provider)
   const privacy = usePopover()
   const features = usePopover()
 
+  useEffect(() => {
+    setProviderDraft(provider)
+  }, [provider])
+
   const saveKey = () => {
-    onApiKeyChange(keyDraft.trim())
+    const trimmed = keyDraft.trim()
+    if (!trimmed) return
+    onCredentialsSave(providerDraft, trimmed)
     setShowKeyInput(false)
     setKeyDraft('')
   }
@@ -118,6 +139,17 @@ export default function Toolbar({
       {/* API key / LLM area */}
       {apiKey ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{
+            fontSize: '11px',
+            color: '#666',
+            fontFamily: 'sans-serif',
+            border: '1px solid #e5e5e5',
+            borderRadius: '999px',
+            padding: '3px 8px',
+            background: '#fafafa',
+          }}>
+            {providerLabel(provider)}
+          </span>
           {llmStatus === 'loading' ? (
             <span style={{ fontSize: '12px', color: '#888', fontFamily: 'sans-serif' }}>Analyzing…</span>
           ) : llmStatus === 'stale' ? (
@@ -149,9 +181,24 @@ export default function Toolbar({
         </div>
       ) : showKeyInput ? (
         <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          <select
+            value={providerDraft}
+            onChange={e => setProviderDraft(e.target.value as LLMProvider)}
+            style={{
+              border: '1px solid #ccc',
+              borderRadius: '5px',
+              padding: '4px 8px',
+              fontSize: '12px',
+              fontFamily: 'sans-serif',
+              background: '#fff',
+            }}
+          >
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+          </select>
           <input
             type="password"
-            placeholder="sk-ant-…"
+            placeholder={keyPlaceholder(providerDraft)}
             value={keyDraft}
             onChange={e => setKeyDraft(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && saveKey()}
@@ -166,9 +213,9 @@ export default function Toolbar({
           {privacy.open && (
             <PopoverBox popoverRef={privacy.popoverRef} btnRef={privacy.btnRef}>
               <div style={{ fontWeight: '600', marginBottom: '6px', color: '#1a1a1a' }}>Your key stays in your browser</div>
-              <p style={{ margin: '0 0 8px' }}>API calls go directly from your browser to <strong>api.anthropic.com</strong> — there is no server on our end. Your key never leaves your machine.</p>
-              <p style={{ margin: '0 0 8px' }}>The key is stored only in your browser's <code style={{ background: '#f5f5f0', padding: '1px 4px', borderRadius: '3px' }}>localStorage</code> and is never sent anywhere except Anthropic.</p>
-              <p style={{ margin: 0, color: '#888' }}>You can remove it at any time with the "Remove key" button.</p>
+              <p style={{ margin: '0 0 8px' }}>API calls go directly from your browser to <strong>{providerHost(providerDraft)}</strong> — there is no server on our end. Your key never leaves your machine.</p>
+              <p style={{ margin: '0 0 8px' }}>The key is stored only in your browser&apos;s <code style={{ background: '#f5f5f0', padding: '1px 4px', borderRadius: '3px' }}>localStorage</code> and is never sent anywhere except the provider you selected.</p>
+              <p style={{ margin: 0, color: '#888' }}>You can remove it at any time with the &quot;Remove key&quot; button.</p>
             </PopoverBox>
           )}
           <button onClick={saveKey} style={{
@@ -176,7 +223,7 @@ export default function Toolbar({
             padding: '4px 10px', cursor: 'pointer', fontSize: '12px',
             fontFamily: 'sans-serif', color: '#16a34a',
           }}>Save</button>
-          <button onClick={() => { setShowKeyInput(false); privacy.setOpen(() => false) }} style={{
+          <button onClick={() => { setShowKeyInput(false); privacy.setOpen(() => false); setProviderDraft(provider); setKeyDraft('') }} style={{
             background: 'transparent', border: '1px solid #e0e0e0', borderRadius: '5px',
             padding: '4px 10px', cursor: 'pointer', fontSize: '12px',
             fontFamily: 'sans-serif', color: '#999',
@@ -187,9 +234,9 @@ export default function Toolbar({
           <InfoBtn open={features.open} setOpen={features.setOpen} btnRef={features.btnRef} />
           {features.open && (
             <PopoverBox popoverRef={features.popoverRef} btnRef={features.btnRef}>
-              <div style={{ fontWeight: '600', marginBottom: '8px', color: '#1a1a1a' }}>Deeper analysis with Claude</div>
+              <div style={{ fontWeight: '600', marginBottom: '8px', color: '#1a1a1a' }}>Deeper analysis with Anthropic or OpenAI</div>
               <p style={{ margin: '0 0 10px', color: '#555' }}>
-                The built-in rules catch word-level and structural tells instantly. An Anthropic API key unlocks two additional passes that require language understanding:
+                The built-in rules catch word-level and structural tells instantly. An Anthropic or OpenAI API key unlocks two additional passes that require language understanding:
               </p>
               <div style={{ marginBottom: '8px' }}>
                 <div style={{ fontWeight: '600', color: '#1a1a1a', marginBottom: '3px' }}>Fast pass — sentence patterns <span style={{ fontWeight: '400', color: '#888' }}>(~5s)</span></div>
@@ -201,12 +248,12 @@ export default function Toolbar({
               </div>
             </PopoverBox>
           )}
-          <button onClick={() => setShowKeyInput(true)} className="btn-throb" style={{
+          <button onClick={() => { setProviderDraft(provider); setShowKeyInput(true) }} className="btn-throb" style={{
             background: '#1a1a1a', border: '1px solid #1a1a1a',
             borderRadius: '5px', padding: '5px 14px', cursor: 'pointer',
             fontSize: '13px', fontFamily: 'sans-serif', color: '#fff', fontWeight: '600',
           }}>
-            + Add Anthropic API key
+            + Add API key
           </button>
         </div>
       )}
